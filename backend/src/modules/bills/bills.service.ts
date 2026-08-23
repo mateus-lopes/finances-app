@@ -132,13 +132,67 @@ export async function listBillsForMonth(userId: number, month: number, year: num
   const accountMap = new Map(accts.map((a) => [a.id, a]));
   const categoryMap = new Map(cats.map((c) => [c.id, c]));
 
-  return rows.map((r) => ({
+  const items = rows.map((r) => ({
     ...r.bill,
     occurrence: r.occurrence ?? null,
     fromAccount: r.bill.fromAccountId ? accountMap.get(r.bill.fromAccountId) ?? null : null,
     toAccount: r.bill.toAccountId ? accountMap.get(r.bill.toAccountId) ?? null : null,
     category: r.bill.categoryId ? categoryMap.get(r.bill.categoryId) ?? null : null,
+    installmentInfo: calcInstallmentInfo(r.bill.startDate, r.bill.endDate, month, year),
   }));
+
+  const totals = calcBillTotals(items);
+  return { items, totals };
+}
+
+function calcInstallmentInfo(
+  startDate: string,
+  endDate: string | null,
+  month: number,
+  year: number,
+): { current: number; total: number } | null {
+  if (!endDate) return null;
+  const start = new Date(startDate + "T00:00:00");
+  const end = new Date(endDate + "T00:00:00");
+  const total =
+    (end.getFullYear() - start.getFullYear()) * 12 +
+    (end.getMonth() - start.getMonth()) +
+    1;
+  const current =
+    (year - start.getFullYear()) * 12 + (month - 1 - start.getMonth()) + 1;
+  return { current: Math.max(1, Math.min(current, total)), total };
+}
+
+type SectionTotals = { total: number; paid: number; pending: number };
+
+function calcBillTotals(
+  items: Array<{ type: string; endDate: string | null; amount: string; occurrence: { amount: string; paid: boolean } | null }>,
+) {
+  const empty = (): SectionTotals => ({ total: 0, paid: 0, pending: 0 });
+  const result = {
+    expenses: empty(),
+    installments: empty(),
+    incomes: empty(),
+    transfers: empty(),
+  };
+
+  for (const bill of items) {
+    if (!bill.occurrence) continue; // skip bills not active this month
+    const amount = parseFloat(bill.occurrence.amount ?? bill.amount ?? "0");
+    const isPaid = bill.occurrence.paid;
+
+    let section: SectionTotals;
+    if (bill.type === "expense" && !bill.endDate) section = result.expenses;
+    else if (bill.type === "expense" && bill.endDate) section = result.installments;
+    else if (bill.type === "income") section = result.incomes;
+    else section = result.transfers;
+
+    section.total += amount;
+    if (isPaid) section.paid += amount;
+    else section.pending += amount;
+  }
+
+  return result;
 }
 
 export async function createBill(userId: number, data: z.infer<typeof billSchema>) {
@@ -209,57 +263,54 @@ export async function toggleOccurrencePaid(userId: number, occurrenceId: number)
     .where(eq(billOccurrences.id, occurrenceId))
     .returning();
 
-  if (bill.type === "transfer" && bill.toAccountId) {
-    const delta = nowPaid
-      ? parseFloat(occ.amount)
-      : -parseFloat(occ.amount);
+  if (nowPaid) {
+    const [tx] = await db
+      .insert(transactions)
+      .values({
+        userId,
+        type: bill.type,
+        fromAccountId: bill.fromAccountId ?? null,
+        toAccountId: bill.toAccountId ?? null,
+        amount: occ.amount,
+        date: occ.dueDate,
+        month: occ.month,
+        year: occ.year,
+        description: bill.name,
+        billId: bill.id,
+      })
+      .returning();
 
     await db
-      .update(accounts)
-      .set({ currentAmount: sql`current_amount + ${delta}` })
-      .where(eq(accounts.id, bill.toAccountId));
+      .update(billOccurrences)
+      .set({ transactionId: tx.id })
+      .where(eq(billOccurrences.id, occurrenceId));
 
-    if (nowPaid) {
-      const [tx] = await db
-        .insert(transactions)
-        .values({
-          userId,
-          type: "transfer",
-          fromAccountId: bill.fromAccountId ?? null,
-          toAccountId: bill.toAccountId,
-          amount: occ.amount,
-          date: occ.dueDate,
-          month: occ.month,
-          year: occ.year,
-          description: bill.name,
-          billId: bill.id,
-        })
-        .returning();
-
+    // Para investimentos: atualiza currentAmount ao aportar
+    if (bill.type === "transfer" && bill.toAccountId) {
       await db
-        .update(billOccurrences)
-        .set({ transactionId: tx.id })
-        .where(eq(billOccurrences.id, occurrenceId));
-
-      return { ...updated, transactionId: tx.id };
-    } else {
-      if (occ.transactionId) {
-        await db.delete(transactions).where(eq(transactions.id, occ.transactionId));
-        await db.update(billOccurrences).set({ transactionId: null }).where(eq(billOccurrences.id, occurrenceId));
-      }
+        .update(accounts)
+        .set({ currentAmount: sql`current_amount + ${parseFloat(occ.amount)}` })
+        .where(eq(accounts.id, bill.toAccountId));
     }
-  } else if (bill.type === "income" && bill.toAccountId) {
-    const delta = nowPaid ? parseFloat(occ.amount) : -parseFloat(occ.amount);
-    await db
-      .update(accounts)
-      .set({ currentAmount: sql`current_amount + ${delta}` })
-      .where(eq(accounts.id, bill.toAccountId));
-  } else if (bill.type === "expense" && bill.fromAccountId) {
-    const delta = nowPaid ? -parseFloat(occ.amount) : parseFloat(occ.amount);
-    await db
-      .update(accounts)
-      .set({ currentAmount: sql`current_amount + ${delta}` })
-      .where(eq(accounts.id, bill.fromAccountId));
+
+    return { ...updated, transactionId: tx.id };
+  } else {
+    if (occ.transactionId) {
+      // Para investimentos: reverte o currentAmount ao desmarcar
+      if (bill.type === "transfer" && bill.toAccountId) {
+        await db
+          .update(accounts)
+          .set({ currentAmount: sql`current_amount - ${parseFloat(occ.amount)}` })
+          .where(eq(accounts.id, bill.toAccountId));
+      }
+      await db.delete(transactions).where(eq(transactions.id, occ.transactionId));
+      const [cleared] = await db
+        .update(billOccurrences)
+        .set({ transactionId: null })
+        .where(eq(billOccurrences.id, occurrenceId))
+        .returning();
+      return cleared;
+    }
   }
 
   return updated;

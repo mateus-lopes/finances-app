@@ -14,6 +14,7 @@ export const accounts = pgTable("accounts", {
   targetAmount: numeric("target_amount", { precision: 14, scale: 2 }),
   currentAmount: numeric("current_amount", { precision: 14, scale: 2 }).notNull().default("0"),
   showProgress: boolean("show_progress").notNull().default(false),
+  isReal: boolean("is_real").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (t) => ({
   userActiveIdx: index("accounts_user_active_idx").on(t.userId, t.active),

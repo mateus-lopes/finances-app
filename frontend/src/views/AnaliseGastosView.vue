@@ -13,8 +13,7 @@ const MONTH_NAMES = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out"
 interface MonthSnap {
   month: number; year: number;
   totalIncome: number; totalExpenses: number; saldo: number;
-  carryOver: number;
-  breakdown: { billExpense: number; transactionExpense: number; billIncome: number; transactionIncome: number; pendingBillExpense: number; pendingBillIncome: number };
+  breakdown: { pendingBillExpense: number; pendingBillIncome: number };
   creditCards: { account: { id: number; name: string; color: string | null }; amount: number; paid: boolean }[];
 }
 interface BillRow {
@@ -47,7 +46,7 @@ async function load() {
     params.map(({ m, y }) =>
       api.get("/dashboard", { params: { month: m, year: y } })
         .then(r => r.data as MonthSnap)
-        .catch(() => ({ month: m, year: y, totalIncome: 0, totalExpenses: 0, saldo: 0, carryOver: 0, breakdown: { billExpense: 0, transactionExpense: 0, billIncome: 0, transactionIncome: 0, pendingBillExpense: 0, pendingBillIncome: 0 }, creditCards: [] }))
+        .catch(() => ({ month: m, year: y, totalIncome: 0, totalExpenses: 0, saldo: 0, breakdown: { pendingBillExpense: 0, pendingBillIncome: 0 }, creditCards: [] }))
     )
   );
   months.value = snaps;
@@ -67,14 +66,8 @@ watch([() => monthStore.month, () => monthStore.year], load, { immediate: true }
 const curSnap   = computed(() => months.value[months.value.length - 1]);
 
 // ── Comprometimento ─────────────────────────────────────────────────────────
-const committed     = computed(() => (curSnap.value?.breakdown.billExpense ?? 0) + (curSnap.value?.breakdown.pendingBillExpense ?? 0));
-const freeToSpend   = computed(() => {
-  const income = curSnap.value?.totalIncome ?? 0;
-  const carry = curSnap.value?.carryOver ?? 0;
-  // Positive carry-over already included in totalIncome (income transaction).
-  // Negative carry-over is in totalExpenses (expense tx) but not in committed, so deduct it here.
-  return income - committed.value + Math.min(0, carry);
-});
+const committed     = computed(() => curSnap.value?.breakdown.pendingBillExpense ?? 0);
+const freeToSpend   = computed(() => (curSnap.value?.totalIncome ?? 0) - committed.value);
 const commitmentPct = computed(() => {
   if (!curSnap.value?.totalIncome) return committed.value > 0 ? 100 : 0;
   return Math.min(100, (committed.value / curSnap.value.totalIncome) * 100);

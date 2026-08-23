@@ -10,6 +10,7 @@ import Progress from "../components/ui/Progress.vue";
 import api from "../services/api";
 
 const { data, loading, load } = useDashboard();
+const hoverCat = ref<number | null>(null);
 const { success, error } = useToast();
 const monthStore = useMonthStore();
 
@@ -46,49 +47,37 @@ const SVG_W = 500;
 const SVG_H = 180;
 const PAD = { top: 8, bottom: 28, left: 50, right: 12 };
 
-interface MonthData { month: number; year: number; totalIncome: number; totalExpenses: number; saldo: number; }
+interface MonthData { month: number; year: number; income: number; expenses: number; saldo: number; }
 const histMonths = ref<MonthData[]>([]);
 
 async function loadHistorical() {
-  const cur = { month: monthStore.month, year: monthStore.year };
-  const params = Array.from({ length: 6 }, (_, i) => {
-    let m = cur.month - (5 - i); let y = cur.year;
-    while (m <= 0) { m += 12; y--; }
-    return { m, y };
-  });
-  histMonths.value = await Promise.all(
-    params.map(({ m, y }) =>
-      api.get("/dashboard", { params: { month: m, year: y } })
-        .then(r => ({ month: r.data.month, year: r.data.year, totalIncome: r.data.totalIncome, totalExpenses: r.data.totalExpenses, saldo: r.data.saldo }))
-        .catch(() => ({ month: m, year: y, totalIncome: 0, totalExpenses: 0, saldo: 0 }))
-    )
-  );
+  try {
+    const { data } = await api.get<MonthData[]>("/dashboard/history", {
+      params: { endMonth: monthStore.month, endYear: monthStore.year, months: 6 },
+    });
+    histMonths.value = data;
+  } catch { histMonths.value = []; }
 }
 
 watch([() => monthStore.month, () => monthStore.year], loadHistorical, { immediate: true });
 
-const curMonthHist = computed(() => histMonths.value[histMonths.value.length - 1]);
-const savingsRate = computed(() => {
-  const m = curMonthHist.value;
-  if (!m || !m.totalIncome) return 0;
-  return Math.max(0, (m.saldo / m.totalIncome) * 100);
-});
+const savingsRate = computed(() => data.value?.savingsRate ?? 0);
 const totalSaldo6m = computed(() => histMonths.value.reduce((s, m) => s + m.saldo, 0));
-const avgIncome = computed(() => histMonths.value.length ? histMonths.value.reduce((s, m) => s + m.totalIncome, 0) / histMonths.value.length : 0);
-const avgExpense = computed(() => histMonths.value.length ? histMonths.value.reduce((s, m) => s + m.totalExpenses, 0) / histMonths.value.length : 0);
+const avgIncome = computed(() => histMonths.value.length ? histMonths.value.reduce((s, m) => s + m.income, 0) / histMonths.value.length : 0);
+const avgExpense = computed(() => histMonths.value.length ? histMonths.value.reduce((s, m) => s + m.expenses, 0) / histMonths.value.length : 0);
 
 const chartData = computed(() => {
   if (!histMonths.value.length) return null;
   const innerW = SVG_W - PAD.left - PAD.right;
   const innerH = SVG_H - PAD.top - PAD.bottom;
-  const allVals = histMonths.value.flatMap(m => [m.totalIncome, m.totalExpenses]);
+  const allVals = histMonths.value.flatMap(m => [m.income, m.expenses]);
   const maxV = Math.max(...allVals, 1);
   const n = histMonths.value.length;
   const px = (i: number) => PAD.left + (n > 1 ? (i / (n - 1)) * innerW : innerW / 2);
   const py = (v: number) => PAD.top + innerH - (v / maxV) * innerH;
   const ticks = [0, 0.33, 0.66, 1].map(t => ({ y: py(t * maxV), label: fmtShort(t * maxV) }));
-  const incPts = histMonths.value.map((m, i) => ({ x: px(i), y: py(m.totalIncome) }));
-  const expPts = histMonths.value.map((m, i) => ({ x: px(i), y: py(m.totalExpenses) }));
+  const incPts = histMonths.value.map((m, i) => ({ x: px(i), y: py(m.income) }));
+  const expPts = histMonths.value.map((m, i) => ({ x: px(i), y: py(m.expenses) }));
   const bottom = PAD.top + innerH;
   const toStr = (pts: { x: number; y: number }[]) => pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
   const toArea = (pts: { x: number; y: number }[]) => {
@@ -168,15 +157,29 @@ const pieOptions = computed(() => {
             <p class="text-xs text-muted-foreground">Despesas</p>
             <p class="text-sm font-semibold text-rose-400">-{{ fmtShort(data.totalExpenses) }}</p>
           </div>
-          <template v-if="data.carryOver !== 0">
+          <template v-if="(data.invested ?? 0) > 0">
             <div class="w-px bg-white/10" />
             <div>
-              <p class="text-xs text-muted-foreground">Anterior</p>
-              <p class="text-sm font-semibold" :class="data.carryOver >= 0 ? 'text-emerald-400' : 'text-rose-400'">
-                {{ data.carryOver >= 0 ? '+' : '' }}{{ fmtShort(data.carryOver) }}
-              </p>
+              <p class="text-xs text-muted-foreground">Investido</p>
+              <p class="text-sm font-semibold text-violet-400">↗{{ fmtShort(data.invested) }}</p>
             </div>
           </template>
+        </div>
+      </div>
+
+      <!-- Saldo Real -->
+      <div class="rounded-2xl p-4 mb-4 border border-border bg-card flex items-center justify-between">
+        <div>
+          <p class="text-xs text-muted-foreground uppercase tracking-wider mb-0.5">Saldo Real</p>
+          <p class="text-lg font-bold" :class="data.realBalance >= 0 ? 'text-emerald-400' : 'text-rose-400'">
+            {{ fmt(data.realBalance) }}
+          </p>
+          <p class="text-xs text-muted-foreground mt-0.5">Acumulado de todas as contas reais</p>
+        </div>
+        <div class="w-10 h-10 rounded-full bg-secondary flex items-center justify-center flex-shrink-0">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" class="text-muted-foreground">
+            <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>
+          </svg>
         </div>
       </div>
 
@@ -198,8 +201,19 @@ const pieOptions = computed(() => {
               </svg>
             </div>
             <div class="flex-1 min-w-0">
-              <p class="text-sm font-medium text-foreground truncate">{{ item.name }}</p>
-              <p class="text-xs text-muted-foreground">vence {{ new Date(item.dueDate + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }) }}</p>
+              <div class="flex items-center gap-1.5">
+                <span
+                  v-if="item.category"
+                  class="w-2 h-2 rounded-full flex-shrink-0 cursor-default"
+                  :style="{ background: item.category.color ?? '#8b5cf6' }"
+                  @mouseenter="hoverCat = item.id"
+                  @mouseleave="hoverCat = null"
+                  @click.stop="hoverCat = hoverCat === item.id ? null : item.id"
+                />
+                <p class="text-sm font-medium text-foreground truncate">{{ item.name }}</p>
+              </div>
+              <p class="text-xs text-muted-foreground mt-0.5">vence {{ new Date(item.dueDate + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }) }}</p>
+              <p v-if="item.category && hoverCat === item.id" class="text-xs mt-0.5 uppercase tracking-wide" :style="{ color: item.category.color ?? '#8b5cf6' }">{{ item.category.name }}</p>
             </div>
             <span class="text-sm font-semibold" :class="item.type === 'income' ? 'text-emerald-400' : 'text-rose-400'">
               {{ item.type === 'income' ? '+' : '-' }}{{ fmtShort(item.amount) }}

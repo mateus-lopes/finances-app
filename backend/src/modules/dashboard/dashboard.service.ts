@@ -2,111 +2,21 @@ import { eq, and, sum, inArray } from "drizzle-orm";
 import { db } from "../../db/client";
 import { transactions, bills, billOccurrences, accounts, categories } from "../../db/schema";
 import { ensureOccurrencesForMonth } from "../bills/bills.service";
-import { getAllInvoicesForMonth } from "../accounts/accounts.service";
-
-function prevMonthYear(month: number, year: number) {
-  return month === 1 ? { month: 12, year: year - 1 } : { month: month - 1, year };
-}
-
-async function getAccountMonthSaldo(userId: number, accountId: number, month: number, year: number): Promise<number> {
-  const [txIn, txOut, billIn, billOut] = await Promise.all([
-    db.select({ total: sum(transactions.amount) }).from(transactions)
-      .where(and(eq(transactions.userId, userId), eq(transactions.toAccountId, accountId), eq(transactions.month, month), eq(transactions.year, year))),
-    db.select({ total: sum(transactions.amount) }).from(transactions)
-      .where(and(eq(transactions.userId, userId), eq(transactions.fromAccountId, accountId), eq(transactions.month, month), eq(transactions.year, year))),
-    db.select({ total: sum(billOccurrences.amount) }).from(billOccurrences)
-      .innerJoin(bills, eq(billOccurrences.billId, bills.id))
-      .where(and(eq(billOccurrences.userId, userId), eq(billOccurrences.month, month), eq(billOccurrences.year, year), eq(billOccurrences.paid, true), eq(bills.type, "income"), eq(bills.toAccountId, accountId))),
-    db.select({ total: sum(billOccurrences.amount) }).from(billOccurrences)
-      .innerJoin(bills, eq(billOccurrences.billId, bills.id))
-      .where(and(eq(billOccurrences.userId, userId), eq(billOccurrences.month, month), eq(billOccurrences.year, year), eq(billOccurrences.paid, true), eq(bills.type, "expense"), eq(bills.fromAccountId, accountId))),
-  ]);
-  return parseFloat(txIn[0]?.total ?? "0") + parseFloat(billIn[0]?.total ?? "0")
-       - parseFloat(txOut[0]?.total ?? "0") - parseFloat(billOut[0]?.total ?? "0");
-}
-
-async function getMonthSaldo(userId: number, month: number, year: number): Promise<number> {
-  const [txInc, txExp, billInc, billExp] = await Promise.all([
-    db.select({ total: sum(transactions.amount) }).from(transactions)
-      .where(and(eq(transactions.userId, userId), eq(transactions.month, month), eq(transactions.year, year), eq(transactions.type, "income"))),
-    db.select({ total: sum(transactions.amount) }).from(transactions)
-      .where(and(eq(transactions.userId, userId), eq(transactions.month, month), eq(transactions.year, year), eq(transactions.type, "expense"))),
-    db.select({ total: sum(billOccurrences.amount) }).from(billOccurrences)
-      .innerJoin(bills, eq(billOccurrences.billId, bills.id))
-      .where(and(eq(billOccurrences.userId, userId), eq(billOccurrences.month, month), eq(billOccurrences.year, year), eq(billOccurrences.paid, true), eq(bills.type, "income"))),
-    db.select({ total: sum(billOccurrences.amount) }).from(billOccurrences)
-      .innerJoin(bills, eq(billOccurrences.billId, bills.id))
-      .where(and(eq(billOccurrences.userId, userId), eq(billOccurrences.month, month), eq(billOccurrences.year, year), eq(billOccurrences.paid, true), eq(bills.type, "expense"))),
-  ]);
-  const income = parseFloat(txInc[0]?.total ?? "0") + parseFloat(billInc[0]?.total ?? "0");
-  const expense = parseFloat(txExp[0]?.total ?? "0") + parseFloat(billExp[0]?.total ?? "0");
-  return income - expense;
-}
-
-export function nextMonthYear(month: number, year: number) {
-  return month === 12 ? { month: 1, year: year + 1 } : { month: month + 1, year };
-}
-
-export async function upsertCarryOverTransactions(userId: number, month: number, year: number) {
-  const prev = prevMonthYear(month, year);
-
-  // Buscar todas as contas líquidas (não-investimento)
-  const liquidAccounts = await db
-    .select({ id: accounts.id })
-    .from(accounts)
-    .where(and(
-      eq(accounts.userId, userId),
-      eq(accounts.active, true),
-      inArray(accounts.type, ["checking", "savings", "cash"]),
-    ));
-
-  // Apagar carry-overs existentes deste mês
-  await db.delete(transactions).where(
-    and(eq(transactions.userId, userId), eq(transactions.month, month), eq(transactions.year, year), eq(transactions.isCarryOver, true))
-  );
-
-  if (!liquidAccounts.length) return;
-
-  const mm = String(month).padStart(2, "0");
-
-  // Para cada conta, calcular saldo do mês anterior e criar carry-over individual
-  for (const account of liquidAccounts) {
-    const prevSaldo = await getAccountMonthSaldo(userId, account.id, prev.month, prev.year);
-    if (prevSaldo === 0) continue;
-
-    await db.insert(transactions).values({
-      userId,
-      type: prevSaldo > 0 ? "income" : "expense",
-      fromAccountId: prevSaldo < 0 ? account.id : null,
-      toAccountId:   prevSaldo > 0 ? account.id : null,
-      amount: String(Math.abs(prevSaldo).toFixed(2)),
-      date: `${year}-${mm}-01`,
-      month,
-      year,
-      description: "Saldo anterior",
-      isCarryOver: true,
-    });
-  }
-}
+import { getAllInvoicesForMonth, getRealBalance, listAccountsWithBalances } from "../accounts/accounts.service";
 
 export async function getDashboard(userId: number, month: number, year: number) {
   await ensureOccurrencesForMonth(userId, month, year);
 
-  // Compute previous month's saldo and upsert carry-over transaction
-  const prev = prevMonthYear(month, year);
-  await upsertCarryOverTransactions(userId, month, year);
-  const prevSaldo = await getMonthSaldo(userId, prev.month, prev.year);
-
   const [
     txIncomeResult,
     txExpenseResult,
-    billIncomeResult,
-    billExpenseResult,
     txRows,
+    txTransfers,
     pendingOccurrences,
     investments,
     creditCardInvoices,
     investmentBillOccs,
+    realBalance,
   ] = await Promise.all([
     db
       .select({ total: sum(transactions.amount) })
@@ -119,33 +29,14 @@ export async function getDashboard(userId: number, month: number, year: number) 
       .where(and(eq(transactions.userId, userId), eq(transactions.month, month), eq(transactions.year, year), eq(transactions.type, "expense"))),
 
     db
-      .select({ total: sum(billOccurrences.amount) })
-      .from(billOccurrences)
-      .innerJoin(bills, eq(billOccurrences.billId, bills.id))
-      .where(and(
-        eq(billOccurrences.userId, userId),
-        eq(billOccurrences.month, month),
-        eq(billOccurrences.year, year),
-        eq(billOccurrences.paid, true),
-        eq(bills.type, "income")
-      )),
-
-    db
-      .select({ total: sum(billOccurrences.amount) })
-      .from(billOccurrences)
-      .innerJoin(bills, eq(billOccurrences.billId, bills.id))
-      .where(and(
-        eq(billOccurrences.userId, userId),
-        eq(billOccurrences.month, month),
-        eq(billOccurrences.year, year),
-        eq(billOccurrences.paid, true),
-        eq(bills.type, "expense")
-      )),
-
-    db
       .select({ categoryId: transactions.categoryId, amount: transactions.amount })
       .from(transactions)
       .where(and(eq(transactions.userId, userId), eq(transactions.month, month), eq(transactions.year, year), eq(transactions.type, "expense"))),
+
+    db
+      .select({ amount: transactions.amount, toAccountId: transactions.toAccountId })
+      .from(transactions)
+      .where(and(eq(transactions.userId, userId), eq(transactions.month, month), eq(transactions.year, year), eq(transactions.type, "transfer"))),
 
     db
       .select({ occ: billOccurrences, bill: bills })
@@ -176,16 +67,21 @@ export async function getDashboard(userId: number, month: number, year: number) 
         eq(billOccurrences.year, year),
         eq(bills.type, "transfer")
       )),
+
+    getRealBalance(userId),
   ]);
 
-  const totalTxIncome = parseFloat(txIncomeResult[0]?.total ?? "0");
-  const totalTxExpense = parseFloat(txExpenseResult[0]?.total ?? "0");
-  const totalBillIncome = parseFloat(billIncomeResult[0]?.total ?? "0");
-  const totalBillExpense = parseFloat(billExpenseResult[0]?.total ?? "0");
+  const accountsData = await listAccountsWithBalances(userId, month, year);
 
-  const totalIncome = totalTxIncome + totalBillIncome;
-  const totalExpenses = totalTxExpense + totalBillExpense;
-  const saldo = totalIncome - totalExpenses;
+  const totalIncome = parseFloat(txIncomeResult[0]?.total ?? "0");
+  const totalExpenses = parseFloat(txExpenseResult[0]?.total ?? "0");
+
+  const investmentIds = new Set(investments.map(inv => inv.id));
+  const invested = txTransfers
+    .filter(t => t.toAccountId != null && investmentIds.has(t.toAccountId))
+    .reduce((s, t) => s + parseFloat(t.amount ?? "0"), 0);
+
+  const saldo = totalIncome - totalExpenses - invested;
 
   const pendingBillExpense = pendingOccurrences
     .filter(({ bill }) => bill.type === "expense")
@@ -194,7 +90,10 @@ export async function getDashboard(userId: number, month: number, year: number) 
     .filter(({ bill }) => bill.type === "income")
     .reduce((acc, { occ }) => acc + parseFloat(occ.amount), 0);
 
-  const categoryIds = [...new Set(txRows.map((r) => r.categoryId).filter(Boolean) as number[])];
+  const categoryIds = [...new Set([
+    ...txRows.map((r) => r.categoryId),
+    ...pendingOccurrences.map(({ bill }) => bill.categoryId),
+  ].filter(Boolean) as number[])];
   const cats = categoryIds.length
     ? await db.select().from(categories).where(and(eq(categories.userId, userId), inArray(categories.id, categoryIds)))
     : [];
@@ -228,31 +127,76 @@ export async function getDashboard(userId: number, month: number, year: number) 
     };
   });
 
+  const savingsRate = totalIncome > 0 ? (saldo / totalIncome) * 100 : 0;
+  const freeToSpend = totalIncome - pendingBillExpense;
+  const commitmentPct = totalIncome > 0 ? (pendingBillExpense / totalIncome) * 100 : 0;
+
   return {
     month,
     year,
     totalIncome,
     totalExpenses,
+    invested,
     saldo,
-    carryOver: prevSaldo,
+    savingsRate,
+    freeToSpend,
+    commitmentPct,
+    realBalance,
+    accountSummary: accountsData.summary,
     breakdown: {
-      transactionIncome: totalTxIncome,
-      billIncome: totalBillIncome,
-      transactionExpense: totalTxExpense,
-      billExpense: totalBillExpense,
       pendingBillExpense,
       pendingBillIncome,
     },
     categoriesBreakdown,
     creditCards: creditCardInvoices,
-    pending: pendingOccurrences.map(({ occ, bill }) => ({
-      id: occ.id,
-      billId: bill.id,
-      name: bill.name,
-      type: bill.type,
-      amount: parseFloat(occ.amount),
-      dueDate: occ.dueDate,
-    })),
+    pending: pendingOccurrences.map(({ occ, bill }) => {
+      const cat = bill.categoryId ? categoryMap.get(bill.categoryId) : null;
+      return {
+        id: occ.id,
+        billId: bill.id,
+        name: bill.name,
+        type: bill.type,
+        amount: parseFloat(occ.amount),
+        dueDate: occ.dueDate,
+        category: cat ? { id: cat.id, name: cat.name, color: cat.color } : null,
+      };
+    }),
     investments: investmentWithOcc,
   };
+}
+
+export async function getMonthStats(userId: number, month: number, year: number) {
+  const [incomeResult, expenseResult] = await Promise.all([
+    db
+      .select({ total: sum(transactions.amount) })
+      .from(transactions)
+      .where(and(eq(transactions.userId, userId), eq(transactions.month, month), eq(transactions.year, year), eq(transactions.type, "income"))),
+    db
+      .select({ total: sum(transactions.amount) })
+      .from(transactions)
+      .where(and(eq(transactions.userId, userId), eq(transactions.month, month), eq(transactions.year, year), eq(transactions.type, "expense"))),
+  ]);
+  const income = parseFloat(incomeResult[0]?.total ?? "0");
+  const expenses = parseFloat(expenseResult[0]?.total ?? "0");
+  const saldo = income - expenses;
+  return { month, year, income, expenses, saldo, savingsRate: income > 0 ? (saldo / income) * 100 : 0 };
+}
+
+function stepMonth(month: number, year: number, steps: number): { month: number; year: number } {
+  let m = month + steps;
+  let y = year;
+  while (m <= 0) { m += 12; y--; }
+  while (m > 12) { m -= 12; y++; }
+  return { month: m, year: y };
+}
+
+export async function getDashboardHistory(
+  userId: number,
+  endMonth: number,
+  endYear: number,
+  months: number,
+) {
+  const periods = Array.from({ length: months }, (_, i) => stepMonth(endMonth, endYear, -(months - 1 - i)));
+  const results = await Promise.all(periods.map(p => getMonthStats(userId, p.month, p.year)));
+  return results;
 }

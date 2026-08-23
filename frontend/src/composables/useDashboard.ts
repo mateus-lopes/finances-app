@@ -9,6 +9,7 @@ export interface DashboardPending {
   type: string;
   amount: number;
   dueDate: string;
+  category: { id: number; name: string; color: string | null } | null;
 }
 
 export interface DashboardInvestment {
@@ -38,8 +39,13 @@ export interface DashboardData {
   year: number;
   totalIncome: number;
   totalExpenses: number;
+  invested: number;
   saldo: number;
-  carryOver: number;
+  savingsRate: number;
+  freeToSpend: number;
+  commitmentPct: number;
+  realBalance: number;
+  accountSummary: { liquidTotal: number; investmentTotal: number; openInvoiceTotal: number };
   categoriesBreakdown: {
     categoryId: number;
     categoryName: string | null;
@@ -50,10 +56,6 @@ export interface DashboardData {
   pending: DashboardPending[];
   investments: DashboardInvestment[];
   breakdown: {
-    transactionIncome: number;
-    billIncome: number;
-    transactionExpense: number;
-    billExpense: number;
     pendingBillExpense: number;
     pendingBillIncome: number;
   };

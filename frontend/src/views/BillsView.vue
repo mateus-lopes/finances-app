@@ -23,17 +23,22 @@ interface Bill {
 }
 
 const bills = ref<Bill[]>([]);
+type SectionTotals = { total: number; paid: number; pending: number };
+const billTotals = ref<{ expenses: SectionTotals; installments: SectionTotals; incomes: SectionTotals; transfers: SectionTotals } | null>(null);
 const loading = ref(false);
 const showDialog = ref(false);
 const submitting = ref(false);
+const editingId = ref<number | null>(null);
+const hoverCat = ref<number | null>(null);
 const activeTab = ref("expense");
 const isInstallment = ref(false);
 const totalInstallments = ref(12);
+const categories = ref<{ id: number; name: string; color: string | null }[]>([]);
 
 const form = ref({
   name: "", type: "expense" as "income" | "expense" | "transfer",
   amount: "", startDate: new Date().toISOString().slice(0, 10),
-  fromAccountId: "", toAccountId: "", frequency: "monthly",
+  fromAccountId: "", toAccountId: "", frequency: "monthly", categoryId: "",
 });
 
 const inputClass = "flex h-9 w-full rounded-lg border border-input bg-secondary/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring";
@@ -42,12 +47,20 @@ const selectClass = "flex h-9 w-full rounded-lg border border-input bg-secondary
 async function load() {
   loading.value = true;
   try {
-    const { data } = await api.get<Bill[]>("/bills", { params: { month: monthStore.month, year: monthStore.year } });
-    bills.value = data;
+    const { data } = await api.get<{ items: Bill[]; totals: typeof billTotals.value }>("/bills", { params: { month: monthStore.month, year: monthStore.year } });
+    bills.value = data.items;
+    billTotals.value = data.totals;
   } finally { loading.value = false; }
 }
 
-onMounted(async () => { await Promise.all([load(), accountsStore.loadAccounts()]); });
+async function loadCategories() {
+  try {
+    const { data } = await api.get<{ id: number; name: string; color: string | null }[]>("/categories");
+    categories.value = data;
+  } catch {}
+}
+
+onMounted(async () => { await Promise.all([load(), accountsStore.loadAccounts(), loadCategories()]); });
 watch([() => monthStore.month, () => monthStore.year], load);
 
 const expenses = computed(() => bills.value.filter(b => b.type === "expense" && !b.endDate));
@@ -72,11 +85,14 @@ const currentItems = computed(() => {
 const isIncomeLike = computed(() => activeTab.value === "income" || activeTab.value === "transfer");
 
 const tabTotals = computed(() => {
-  const list = currentItems.value;
-  const total = list.reduce((s, b) => s + Number(b.occurrence?.amount ?? b.amount), 0);
-  const paid = list.filter(b => b.occurrence?.paid).reduce((s, b) => s + Number(b.occurrence!.amount), 0);
-  const pending = list.filter(b => b.occurrence && !b.occurrence.paid).reduce((s, b) => s + Number(b.occurrence!.amount), 0);
-  return { total, paid, pending };
+  if (!billTotals.value) return { total: 0, paid: 0, pending: 0 };
+  const map: Record<string, typeof billTotals.value.expenses> = {
+    expense: billTotals.value.expenses,
+    installment: billTotals.value.installments,
+    income: billTotals.value.incomes,
+    transfer: billTotals.value.transfers,
+  };
+  return map[activeTab.value] ?? { total: 0, paid: 0, pending: 0 };
 });
 
 function fmt(v: string | number) {
@@ -96,8 +112,37 @@ function installmentInfo(bill: Bill) {
 }
 
 async function toggle(occurrenceId: number) {
-  try { await api.patch(`/bills/occurrences/${occurrenceId}/pay`); await load(); }
-  catch { error("Erro ao atualizar"); }
+  const bill = bills.value.find(b => b.occurrence?.id === occurrenceId);
+  if (!bill?.occurrence) return;
+
+  const prevPaid = bill.occurrence.paid;
+  const nowPaid = !prevPaid;
+  const amount = parseFloat(bill.amount);
+
+  // Optimistic update — item
+  bill.occurrence.paid = nowPaid;
+
+  // Optimistic update — totais
+  if (billTotals.value) {
+    const key = bill.type === "income" ? "incomes" : bill.type === "transfer" ? "transfers" : bill.endDate ? "installments" : "expenses";
+    const sec = billTotals.value[key];
+    if (nowPaid) { sec.paid += amount; sec.pending -= amount; }
+    else         { sec.paid -= amount; sec.pending += amount; }
+  }
+
+  try {
+    await api.patch(`/bills/occurrences/${occurrenceId}/pay`);
+  } catch {
+    // Rollback
+    bill.occurrence.paid = prevPaid;
+    if (billTotals.value) {
+      const key = bill.type === "income" ? "incomes" : bill.type === "transfer" ? "transfers" : bill.endDate ? "installments" : "expenses";
+      const sec = billTotals.value[key];
+      if (nowPaid) { sec.paid -= amount; sec.pending += amount; }
+      else         { sec.paid += amount; sec.pending -= amount; }
+    }
+    error("Erro ao atualizar");
+  }
 }
 
 async function remove(id: number) {
@@ -106,9 +151,34 @@ async function remove(id: number) {
 }
 
 function openNew() {
-  form.value = { name: "", type: "expense", amount: "", startDate: new Date().toISOString().slice(0, 10), fromAccountId: "", toAccountId: "", frequency: "monthly" };
+  editingId.value = null;
+  form.value = { name: "", type: "expense", amount: "", startDate: new Date().toISOString().slice(0, 10), fromAccountId: "", toAccountId: "", frequency: "monthly", categoryId: "" };
   isInstallment.value = false;
   totalInstallments.value = 12;
+  showDialog.value = true;
+}
+
+function openEdit(bill: Bill) {
+  editingId.value = bill.id;
+  const hasEnd = !!bill.endDate;
+  let instCount = 12;
+  if (hasEnd) {
+    const s = new Date(bill.startDate + "T00:00:00");
+    const e = new Date(bill.endDate! + "T00:00:00");
+    instCount = (e.getFullYear() - s.getFullYear()) * 12 + (e.getMonth() - s.getMonth()) + 1;
+  }
+  form.value = {
+    name: bill.name,
+    type: bill.type,
+    amount: bill.amount,
+    startDate: bill.startDate,
+    fromAccountId: bill.fromAccount ? String(bill.fromAccount.id) : "",
+    toAccountId: bill.toAccount ? String(bill.toAccount.id) : "",
+    frequency: bill.frequency,
+    categoryId: bill.category ? String(bill.category.id) : "",
+  };
+  isInstallment.value = hasEnd;
+  totalInstallments.value = instCount;
   showDialog.value = true;
 }
 
@@ -123,17 +193,24 @@ async function submit() {
   submitting.value = true;
   try {
     const endDate = isInstallment.value ? calcEndDate(form.value.startDate, totalInstallments.value) : null;
-    await api.post("/bills", {
+    const payload = {
       name: form.value.name, type: form.value.type,
       amount: parseFloat(form.value.amount), frequency: form.value.frequency,
       startDate: form.value.startDate, endDate,
       fromAccountId: form.value.fromAccountId ? parseInt(form.value.fromAccountId) : null,
       toAccountId: form.value.toAccountId ? parseInt(form.value.toAccountId) : null,
-    });
+      categoryId: form.value.categoryId ? parseInt(form.value.categoryId) : null,
+    };
+    if (editingId.value) {
+      await api.put(`/bills/${editingId.value}`, payload);
+      success("Atualizado com sucesso");
+    } else {
+      await api.post("/bills", payload);
+      success("Criado com sucesso");
+    }
     showDialog.value = false;
     await load();
-    success("Criado com sucesso");
-  } catch { error("Erro ao criar"); }
+  } catch { error(editingId.value ? "Erro ao atualizar" : "Erro ao criar"); }
   finally { submitting.value = false; }
 }
 </script>
@@ -212,6 +289,14 @@ async function submit() {
 
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-1.5">
+              <span
+                v-if="bill.category"
+                class="w-2 h-2 rounded-full flex-shrink-0 cursor-default"
+                :style="{ background: bill.category.color ?? '#8b5cf6' }"
+                @mouseenter="hoverCat = bill.id"
+                @mouseleave="hoverCat = null"
+                @click.stop="hoverCat = hoverCat === bill.id ? null : bill.id"
+              />
               <p class="text-sm font-medium text-foreground truncate" :class="{ 'line-through text-muted-foreground': bill.occurrence?.paid }">
                 {{ bill.name }}
               </p>
@@ -225,14 +310,21 @@ async function submit() {
               <span v-if="bill.toAccount" class="text-xs text-muted-foreground">{{ bill.toAccount.name }}</span>
               <span v-if="bill.occurrence" class="text-xs text-muted-foreground">venc. {{ fmtDate(bill.occurrence.dueDate) }}</span>
             </div>
+            <p v-if="bill.category && hoverCat === bill.id" class="text-xs mt-0.5 uppercase tracking-wide" :style="{ color: bill.category.color ?? '#8b5cf6' }">{{ bill.category.name }}</p>
           </div>
 
           <div class="flex items-center gap-2">
             <span class="text-sm font-semibold" :class="bill.type === 'income' ? 'text-emerald-400' : bill.type === 'transfer' ? 'text-blue-400' : 'text-rose-400'">
               {{ fmt(bill.amount) }}
             </span>
+            <button type="button" @click="openEdit(bill)"
+              class="h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary transition-all">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+              </svg>
+            </button>
             <button type="button" @click="remove(bill.id)"
-              class="opacity-0 group-hover:opacity-100 h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-rose-400 hover:bg-rose-500/10 transition-all">
+              class="h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-rose-400 hover:bg-rose-500/10 transition-all">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/>
               </svg>
@@ -243,7 +335,7 @@ async function submit() {
     </template>
 
     <!-- Dialog -->
-    <Dialog :open="showDialog" title="Novo recorrente" @update:open="showDialog = $event">
+    <Dialog :open="showDialog" :title="editingId ? 'Editar recorrente' : 'Novo recorrente'" @update:open="showDialog = $event">
       <!-- Type toggle -->
       <div class="flex gap-1.5 mb-4 p-1 bg-secondary rounded-lg">
         <button v-for="[v,l] in [['expense','Despesa'],['income','Receita'],['transfer','Aporte']]" :key="v" type="button"
@@ -276,6 +368,13 @@ async function submit() {
           <select v-model="form.toAccountId" :class="selectClass">
             <option value="">Não especificar</option>
             <option v-for="a in accountsStore.accounts.filter(a => ['checking','savings','cash','investment'].includes(a.type))" :key="a.id" :value="String(a.id)">{{ a.name }}</option>
+          </select>
+        </div>
+        <div v-if="form.type !== 'transfer' && categories.length">
+          <label class="text-xs text-muted-foreground block mb-1">Categoria</label>
+          <select v-model="form.categoryId" :class="selectClass">
+            <option value="">Sem categoria</option>
+            <option v-for="c in categories" :key="c.id" :value="String(c.id)">{{ c.name }}</option>
           </select>
         </div>
         <div v-if="form.type === 'expense'" class="flex items-center justify-between rounded-lg bg-secondary/50 px-3 py-2.5">

@@ -1,14 +1,17 @@
 import { eq, and, sum, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../../db/client";
-import { accounts, transactions, bills, billOccurrences, creditCardInvoices, ACCOUNT_TYPES } from "../../db/schema";
+import { accounts, transactions, creditCardInvoices, ACCOUNT_TYPES } from "../../db/schema";
 
 export const accountSchema = z.object({
   name: z.string().min(1).max(100),
   type: z.enum(ACCOUNT_TYPES),
   color: z.string().optional(),
   targetAmount: z.coerce.number().positive().optional(),
+  currentAmount: z.coerce.number().nonnegative().optional(),
   showProgress: z.boolean().optional(),
+  isReal: z.boolean().optional().default(false),
+  initialBalance: z.coerce.number().nonnegative().optional(),
 });
 
 export async function listAccounts(userId: number) {
@@ -29,8 +32,28 @@ export async function createAccount(userId: number, data: z.infer<typeof account
       color: data.color,
       targetAmount: data.targetAmount ? String(data.targetAmount) : null,
       showProgress: data.showProgress ?? false,
+      isReal: data.isReal ?? false,
     })
     .returning();
+
+  if (data.isReal && data.initialBalance && data.initialBalance > 0) {
+    const now = new Date();
+    const month = now.getMonth() + 1;
+    const year = now.getFullYear();
+    const mm = String(month).padStart(2, "0");
+    await db.insert(transactions).values({
+      userId,
+      type: "income",
+      toAccountId: account.id,
+      amount: String(data.initialBalance.toFixed(2)),
+      date: `${year}-${mm}-01`,
+      month,
+      year,
+      description: "Saldo inicial",
+      isInitialBalance: true,
+    });
+  }
+
   return account;
 }
 
@@ -42,7 +65,9 @@ export async function updateAccount(userId: number, id: number, data: z.infer<ty
       type: data.type,
       color: data.color,
       targetAmount: data.targetAmount ? String(data.targetAmount) : null,
+      currentAmount: data.currentAmount !== undefined ? String(data.currentAmount.toFixed(2)) : undefined,
       showProgress: data.showProgress ?? false,
+      isReal: data.isReal ?? false,
     })
     .where(and(eq(accounts.id, id), eq(accounts.userId, userId)))
     .returning();
@@ -85,17 +110,18 @@ export async function getAccountBalance(userId: number, accountId: number): Prom
   return inflow - outflow;
 }
 
+const LIQUID_TYPES = ["checking", "savings", "cash"] as const;
+
 export async function listAccountsWithBalances(userId: number, month: number, year: number) {
   const accts = await listAccounts(userId);
-  if (!accts.length) return [];
-
-  const nonInvestmentIds = accts.filter(a => a.type !== "investment").map(a => a.id);
-
-  if (!nonInvestmentIds.length) {
-    return accts.map(a => ({ ...a, balance: parseFloat(a.currentAmount ?? "0") }));
+  if (!accts.length) {
+    return { accounts: [], summary: { liquidTotal: 0, investmentTotal: 0, openInvoiceTotal: 0 } };
   }
 
-  const [inflows, outflows, billInflows, billOutflows] = await Promise.all([
+  const allIds = accts.map(a => a.id);
+
+  // Bills pagas geram transações — saldo vem apenas de transações
+  const [inflows, outflows, invoices] = await Promise.all([
     db
       .select({ accountId: transactions.toAccountId, total: sum(transactions.amount) })
       .from(transactions)
@@ -103,7 +129,7 @@ export async function listAccountsWithBalances(userId: number, month: number, ye
         eq(transactions.userId, userId),
         eq(transactions.month, month),
         eq(transactions.year, year),
-        inArray(transactions.toAccountId, nonInvestmentIds),
+        inArray(transactions.toAccountId, allIds),
       ))
       .groupBy(transactions.toAccountId),
 
@@ -114,53 +140,38 @@ export async function listAccountsWithBalances(userId: number, month: number, ye
         eq(transactions.userId, userId),
         eq(transactions.month, month),
         eq(transactions.year, year),
-        inArray(transactions.fromAccountId, nonInvestmentIds),
+        inArray(transactions.fromAccountId, allIds),
       ))
       .groupBy(transactions.fromAccountId),
 
-    db
-      .select({ accountId: bills.toAccountId, total: sum(billOccurrences.amount) })
-      .from(billOccurrences)
-      .innerJoin(bills, eq(billOccurrences.billId, bills.id))
-      .where(and(
-        eq(billOccurrences.userId, userId),
-        eq(billOccurrences.month, month),
-        eq(billOccurrences.year, year),
-        eq(billOccurrences.paid, true),
-        eq(bills.type, "income"),
-        inArray(bills.toAccountId, nonInvestmentIds),
-      ))
-      .groupBy(bills.toAccountId),
-
-    db
-      .select({ accountId: bills.fromAccountId, total: sum(billOccurrences.amount) })
-      .from(billOccurrences)
-      .innerJoin(bills, eq(billOccurrences.billId, bills.id))
-      .where(and(
-        eq(billOccurrences.userId, userId),
-        eq(billOccurrences.month, month),
-        eq(billOccurrences.year, year),
-        eq(billOccurrences.paid, true),
-        eq(bills.type, "expense"),
-        inArray(bills.fromAccountId, nonInvestmentIds),
-      ))
-      .groupBy(bills.fromAccountId),
+    getAllInvoicesForMonth(userId, month, year),
   ]);
 
   const inflowMap  = new Map(inflows.map(r => [r.accountId, parseFloat(r.total ?? "0")]));
   const outflowMap = new Map(outflows.map(r => [r.accountId, parseFloat(r.total ?? "0")]));
-  const billInMap  = new Map(billInflows.map(r => [r.accountId, parseFloat(r.total ?? "0")]));
-  const billOutMap = new Map(billOutflows.map(r => [r.accountId, parseFloat(r.total ?? "0")]));
 
-  return accts.map(a => ({
-    ...a,
-    balance: a.type === "investment"
-      ? parseFloat(a.currentAmount ?? "0")
-      : (inflowMap.get(a.id) ?? 0)
-        + (billInMap.get(a.id) ?? 0)
-        - (outflowMap.get(a.id) ?? 0)
-        - (billOutMap.get(a.id) ?? 0),
-  }));
+  const accountsWithBalance = accts.map(a => {
+    const txBalance = (inflowMap.get(a.id) ?? 0) - (outflowMap.get(a.id) ?? 0);
+    const base = a.type === "investment" ? parseFloat(a.currentAmount ?? "0") : 0;
+    return { ...a, balance: base + txBalance };
+  });
+
+  const liquidTotal = accountsWithBalance
+    .filter(a => (LIQUID_TYPES as readonly string[]).includes(a.type))
+    .reduce((acc, a) => acc + a.balance, 0);
+
+  const investmentTotal = accountsWithBalance
+    .filter(a => a.type === "investment")
+    .reduce((acc, a) => acc + a.balance, 0);
+
+  const openInvoiceTotal = invoices
+    .filter(inv => !inv.paid)
+    .reduce((acc, inv) => acc + inv.amount, 0);
+
+  return {
+    accounts: accountsWithBalance,
+    summary: { liquidTotal, investmentTotal, openInvoiceTotal },
+  };
 }
 
 export async function getInvoice(userId: number, accountId: number, month: number, year: number) {
@@ -346,4 +357,34 @@ export async function getAllInvoicesForMonth(userId: number, month: number, year
       invoiceId: invoice?.id ?? null,
     };
   });
+}
+
+export async function getRealBalance(userId: number): Promise<number> {
+  const realAccounts = await db
+    .select({ id: accounts.id })
+    .from(accounts)
+    .where(and(eq(accounts.userId, userId), eq(accounts.isReal, true), eq(accounts.active, true)));
+
+  if (!realAccounts.length) return 0;
+
+  const realIds = realAccounts.map((a) => a.id);
+
+  const [inflows, outflows] = await Promise.all([
+    db
+      .select({ total: sum(transactions.amount) })
+      .from(transactions)
+      .where(and(
+        eq(transactions.userId, userId),
+        inArray(transactions.toAccountId, realIds),
+      )),
+    db
+      .select({ total: sum(transactions.amount) })
+      .from(transactions)
+      .where(and(
+        eq(transactions.userId, userId),
+        inArray(transactions.fromAccountId, realIds),
+      )),
+  ]);
+
+  return parseFloat(inflows[0]?.total ?? "0") - parseFloat(outflows[0]?.total ?? "0");
 }

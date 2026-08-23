@@ -23,6 +23,7 @@ export const transactions = pgTable("transactions", {
   billId: integer("bill_id").references(() => bills.id, { onDelete: "set null" }),
   reconciled: boolean("reconciled").notNull().default(false),
   isCarryOver: boolean("is_carry_over").notNull().default(false),
+  isInitialBalance: boolean("is_initial_balance").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (t) => ({
   userMonthYearIdx: index("tx_user_month_year_idx").on(t.userId, t.month, t.year),

@@ -11,6 +11,7 @@ export interface Account {
   targetAmount: string | null;
   currentAmount: string;
   showProgress: boolean;
+  isReal: boolean;
   balance: number;
   createdAt: string;
 }
@@ -22,8 +23,8 @@ export const useAccountsStore = defineStore("accounts", () => {
   async function loadAccounts() {
     loading.value = true;
     try {
-      const { data } = await api.get<Account[]>("/accounts");
-      accounts.value = data;
+      const { data } = await api.get<{ accounts: Account[] }>("/accounts");
+      accounts.value = data.accounts;
     } finally {
       loading.value = false;
     }

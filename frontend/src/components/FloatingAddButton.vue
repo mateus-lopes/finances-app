@@ -25,6 +25,7 @@ function select(type: "expense" | "income" | "bill") {
         </span>
         <button
           @click="select('bill')"
+          aria-label="Recorrente"
           class="w-11 h-11 rounded-full bg-violet-500 text-white flex items-center justify-center shadow-lg shadow-violet-500/30 active:scale-90 transition-transform"
         >
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -40,6 +41,7 @@ function select(type: "expense" | "income" | "bill") {
         </span>
         <button
           @click="select('income')"
+          aria-label="Receita"
           class="w-11 h-11 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-lg shadow-emerald-500/30 active:scale-90 transition-transform"
         >
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -54,6 +56,7 @@ function select(type: "expense" | "income" | "bill") {
         </span>
         <button
           @click="select('expense')"
+          aria-label="Despesa"
           class="w-11 h-11 rounded-full bg-rose-500 text-white flex items-center justify-center shadow-lg shadow-rose-500/30 active:scale-90 transition-transform"
         >
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">

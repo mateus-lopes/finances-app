@@ -9,7 +9,6 @@ import {
   deleteTransaction,
   transactionSchema,
 } from "./transactions.service";
-import { upsertCarryOverTransactions, nextMonthYear } from "../dashboard/dashboard.service";
 
 const router = Router();
 router.use(requireAuth);
@@ -28,7 +27,6 @@ router.get(
     const parsed = querySchema.safeParse(req.query);
     if (!parsed.success) { res.status(400).json({ error: "month e year são obrigatórios" }); return; }
     const { month, year, ...filters } = parsed.data;
-    await upsertCarryOverTransactions(req.userId!, month, year);
     res.json(await listTransactions(req.userId!, month, year, filters));
   })
 );
@@ -39,8 +37,6 @@ router.post(
     const parsed = transactionSchema.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
     const tx = await createTransaction(req.userId!, parsed.data);
-    const next = nextMonthYear(tx.month!, tx.year!);
-    upsertCarryOverTransactions(req.userId!, next.month, next.year).catch(() => {});
     res.status(201).json(tx);
   })
 );
@@ -65,8 +61,6 @@ router.delete(
     if (isNaN(id)) { res.status(400).json({ error: "ID inválido" }); return; }
     const tx = await deleteTransaction(req.userId!, id);
     if (!tx) { res.status(404).json({ error: "Transação não encontrada" }); return; }
-    const next = nextMonthYear(tx.month!, tx.year!);
-    upsertCarryOverTransactions(req.userId!, next.month, next.year).catch(() => {});
     res.json({ ok: true });
   })
 );

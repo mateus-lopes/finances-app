@@ -19,16 +19,18 @@ interface Transaction {
   amount: string;
   date: string;
   description: string;
-  isCarryOver: boolean;
   fromAccount: { id: number; name: string; color: string | null } | null;
   toAccount: { id: number; name: string; color: string | null } | null;
   category: { id: number; name: string; color: string | null } | null;
 }
 
 const transactions = ref<Transaction[]>([]);
+const totals = ref({ income: 0, expense: 0, invested: 0, balance: 0 });
 const loading = ref(false);
 const showDialog = ref(false);
 const submitting = ref(false);
+const hoverCat = ref<number | null>(null);
+const categories = ref<{ id: number; name: string; color: string | null }[]>([]);
 
 const form = ref({
   type: "expense" as "income" | "expense" | "transfer",
@@ -37,6 +39,7 @@ const form = ref({
   description: "",
   fromAccountId: "",
   toAccountId: "",
+  categoryId: "",
 });
 
 const inputClass = "flex h-9 w-full rounded-lg border border-input bg-secondary/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring";
@@ -45,14 +48,22 @@ const selectClass = "flex h-9 w-full rounded-lg border border-input bg-secondary
 async function load() {
   loading.value = true;
   try {
-    const { data } = await api.get<Transaction[]>("/transactions", {
+    const { data } = await api.get<{ items: Transaction[]; totals: { income: number; expense: number; balance: number } }>("/transactions", {
       params: { month: monthStore.month, year: monthStore.year },
     });
-    transactions.value = data;
+    transactions.value = data.items;
+    totals.value = data.totals;
   } finally { loading.value = false; }
 }
 
-onMounted(async () => { await Promise.all([load(), accountsStore.loadAccounts()]); });
+async function loadCategories() {
+  try {
+    const { data } = await api.get<{ id: number; name: string; color: string | null }[]>("/categories");
+    categories.value = data;
+  } catch {}
+}
+
+onMounted(async () => { await Promise.all([load(), accountsStore.loadAccounts(), loadCategories()]); });
 watch([() => monthStore.month, () => monthStore.year], load);
 
 function fmt(v: string | number) {
@@ -63,7 +74,7 @@ function fmtDate(d: string) {
 }
 
 function openNew() {
-  form.value = { type: "expense", amount: "", date: new Date().toISOString().slice(0, 10), description: "", fromAccountId: "", toAccountId: "" };
+  form.value = { type: "expense", amount: "", date: new Date().toISOString().slice(0, 10), description: "", fromAccountId: "", toAccountId: "", categoryId: "" };
   showDialog.value = true;
 }
 
@@ -78,6 +89,7 @@ async function submit() {
       description: form.value.description,
       fromAccountId: form.value.fromAccountId ? parseInt(form.value.fromAccountId) : null,
       toAccountId: form.value.toAccountId ? parseInt(form.value.toAccountId) : null,
+      categoryId: form.value.categoryId ? parseInt(form.value.categoryId) : null,
     });
     showDialog.value = false;
     await load();
@@ -104,33 +116,10 @@ const typeColor: Record<string, string> = {
   transfer: "bg-blue-500/15 text-blue-400",
 };
 
-const regularTransactions = computed(() => transactions.value.filter(tx => !tx.isCarryOver));
-
-const totalIncome = computed(() =>
-  regularTransactions.value.filter(tx => tx.type === "income").reduce((s, tx) => s + Number(tx.amount), 0)
-);
-const totalExpense = computed(() =>
-  regularTransactions.value.filter(tx => tx.type === "expense").reduce((s, tx) => s + Number(tx.amount), 0)
-);
-const saldoMes = computed(() => totalIncome.value - totalExpense.value);
-
-const liquidAccounts = computed(() =>
-  accountsStore.accounts.filter(a => ["checking", "savings", "cash"].includes(a.type))
-);
-
-const adjustmentRows = computed(() =>
-  liquidAccounts.value.map(account => {
-    const tx = transactions.value.find(
-      tx => tx.isCarryOver && (tx.fromAccount?.id === account.id || tx.toAccount?.id === account.id)
-    );
-    return {
-      account,
-      amount: tx ? Number(tx.amount) : 0,
-      positive: tx?.type === "income",
-      hasValue: !!tx,
-    };
-  })
-);
+const totalIncome = computed(() => totals.value.income);
+const totalExpense = computed(() => totals.value.expense);
+const totalInvested = computed(() => totals.value.invested ?? 0);
+const saldoMes = computed(() => totals.value.balance);
 </script>
 
 <template>
@@ -149,9 +138,9 @@ const adjustmentRows = computed(() =>
     </div>
 
     <!-- Totalizadores -->
-    <div class="grid grid-cols-3 gap-3 mb-5">
+    <div class="grid gap-3 mb-5" :class="totalInvested > 0 ? 'grid-cols-4' : 'grid-cols-3'">
       <template v-if="loading">
-        <Skeleton class="h-16 rounded-xl" v-for="i in 3" :key="i" />
+        <Skeleton class="h-16 rounded-xl" v-for="i in (totalInvested > 0 ? 4 : 3)" :key="i" />
       </template>
       <template v-else>
         <div class="rounded-xl border border-border bg-card px-4 py-3">
@@ -161,6 +150,10 @@ const adjustmentRows = computed(() =>
         <div class="rounded-xl border border-border bg-card px-4 py-3">
           <p class="text-xs text-muted-foreground mb-1">Saídas</p>
           <p class="text-sm font-bold text-rose-400">-{{ fmt(totalExpense) }}</p>
+        </div>
+        <div v-if="totalInvested > 0" class="rounded-xl border border-violet-500/30 bg-violet-500/5 px-4 py-3">
+          <p class="text-xs text-muted-foreground mb-1">Investido</p>
+          <p class="text-sm font-bold text-violet-400">↗{{ fmt(totalInvested) }}</p>
         </div>
         <div class="rounded-xl border border-border bg-card px-4 py-3">
           <p class="text-xs text-muted-foreground mb-1">Saldo</p>
@@ -176,37 +169,12 @@ const adjustmentRows = computed(() =>
     </template>
 
     <template v-else>
-      <!-- Ajuste mensal -->
-      <template v-if="liquidAccounts.length">
-        <p class="section-label mb-2">Ajuste mensal</p>
-        <div class="rounded-xl border border-border bg-card overflow-hidden mb-4">
-          <div
-            v-for="(row, i) in adjustmentRows"
-            :key="row.account.id"
-            class="flex items-center gap-3 px-4 py-3"
-            :class="{ 'border-t border-border': i > 0 }"
-          >
-            <div class="w-2 h-2 rounded-full flex-shrink-0" :style="{ backgroundColor: row.account.color ?? '#94a3b8' }" />
-            <div class="flex-1 min-w-0">
-              <p class="text-sm font-medium text-foreground">{{ row.account.name }}</p>
-              <p class="text-xs text-muted-foreground">Saldo anterior</p>
-            </div>
-            <span
-              class="text-sm font-semibold tabular-nums"
-              :class="!row.hasValue ? 'text-muted-foreground' : row.positive ? 'text-emerald-400' : 'text-rose-400'"
-            >
-              {{ !row.hasValue ? 'R$ 0,00' : (row.positive ? '+' : '-') + fmt(row.amount) }}
-            </span>
-          </div>
-        </div>
-      </template>
-
       <!-- Transações do mês -->
-      <template v-if="regularTransactions.length">
+      <template v-if="transactions.length">
         <p class="section-label mb-2">Transações</p>
         <div class="rounded-xl border border-border bg-card overflow-hidden">
           <div
-            v-for="(tx, i) in regularTransactions"
+            v-for="(tx, i) in transactions"
             :key="tx.id"
             class="flex items-center gap-3 px-4 py-3 group"
             :class="{ 'border-t border-border': i > 0 }"
@@ -215,17 +183,23 @@ const adjustmentRows = computed(() =>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" v-html="typeIcon[tx.type]" />
             </div>
             <div class="flex-1 min-w-0">
-              <p class="text-sm font-medium text-foreground truncate">{{ tx.description }}</p>
+              <div class="flex items-center gap-1.5">
+                <span
+                  v-if="tx.category"
+                  class="w-2 h-2 rounded-full flex-shrink-0 cursor-default"
+                  :style="{ background: tx.category.color ?? '#8b5cf6' }"
+                  @mouseenter="hoverCat = tx.id"
+                  @mouseleave="hoverCat = null"
+                  @click.stop="hoverCat = hoverCat === tx.id ? null : tx.id"
+                />
+                <p class="text-sm font-medium text-foreground truncate">{{ tx.description }}</p>
+              </div>
               <div class="flex items-center gap-1.5 mt-0.5">
                 <span v-if="tx.fromAccount" class="text-xs text-muted-foreground">{{ tx.fromAccount.name }}</span>
                 <span v-else-if="tx.toAccount" class="text-xs text-muted-foreground">{{ tx.toAccount.name }}</span>
                 <span v-if="tx.fromAccount && tx.toAccount" class="text-xs text-muted-foreground">→ {{ tx.toAccount.name }}</span>
-                <span
-                  v-if="tx.category"
-                  class="text-xs px-1.5 py-0.5 rounded-full border"
-                  :style="{ color: tx.category.color ?? '#8b5cf6', borderColor: (tx.category.color ?? '#8b5cf6') + '40', background: (tx.category.color ?? '#8b5cf6') + '15' }"
-                >{{ tx.category.name }}</span>
               </div>
+              <p v-if="tx.category && hoverCat === tx.id" class="text-xs mt-0.5 uppercase tracking-wide" :style="{ color: tx.category.color ?? '#8b5cf6' }">{{ tx.category.name }}</p>
             </div>
             <div class="flex flex-col items-end gap-1">
               <span class="text-sm font-semibold tabular-nums" :class="tx.type === 'income' ? 'text-emerald-400' : tx.type === 'expense' ? 'text-rose-400' : 'text-blue-400'">
@@ -236,7 +210,7 @@ const adjustmentRows = computed(() =>
             <button
               type="button"
               @click="remove(tx.id)"
-              class="ml-1 opacity-0 group-hover:opacity-100 h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-rose-400 hover:bg-rose-500/10 transition-all"
+              class="ml-1 h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-rose-400 hover:bg-rose-500/10 transition-all"
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/>
@@ -246,7 +220,7 @@ const adjustmentRows = computed(() =>
         </div>
       </template>
 
-      <div v-if="!liquidAccounts.length && !regularTransactions.length" class="flex flex-col items-center justify-center py-20 text-center">
+      <div v-else class="flex flex-col items-center justify-center py-20 text-center">
         <div class="w-14 h-14 rounded-2xl bg-secondary flex items-center justify-center mb-3">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="text-muted-foreground">
             <path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4"/>
@@ -289,6 +263,13 @@ const adjustmentRows = computed(() =>
           <select v-model="form.toAccountId" :class="selectClass">
             <option value="">Não especificar</option>
             <option v-for="a in accountsStore.accounts.filter(a => ['checking','savings','cash','investment'].includes(a.type))" :key="a.id" :value="String(a.id)">{{ a.name }}</option>
+          </select>
+        </div>
+        <div v-if="form.type !== 'transfer' && categories.length">
+          <label class="text-xs text-muted-foreground block mb-1">Categoria</label>
+          <select v-model="form.categoryId" :class="selectClass">
+            <option value="">Sem categoria</option>
+            <option v-for="c in categories" :key="c.id" :value="String(c.id)">{{ c.name }}</option>
           </select>
         </div>
         <div class="flex gap-2 pt-1">

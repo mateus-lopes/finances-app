@@ -9,7 +9,7 @@ const router = Router();
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10,
+  max: env.NODE_ENV === "production" ? 10 : 10000,
   message: { error: "Muitas tentativas. Tente novamente em 15 minutos." },
 });
 

@@ -15,7 +15,6 @@ const PAGE_TITLES: Record<string, string> = {
   "/recorrentes": "Recorrentes",
   "/contas": "Contas",
   "/categorias": "Categorias",
-  "/analise-gastos": "Análise de Gastos",
 };
 </script>
 

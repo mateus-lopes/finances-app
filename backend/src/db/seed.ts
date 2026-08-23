@@ -39,14 +39,14 @@ async function seed() {
 
   // ---- Accounts ----
   const [bbCorrente, bbCredito, brad2397, brad2415, bradCorrente, havanCard, carteira, interMariana, aptFerias] = await db.insert(accounts).values([
-    { userId: uid, name: "BB Corrente",        type: "checking",    color: "#facc15" },
+    { userId: uid, name: "BB Corrente",        type: "checking",    color: "#facc15", isReal: true },
     { userId: uid, name: "BB Crédito 1000",    type: "credit_card", color: "#60a5fa" },
     { userId: uid, name: "Bradesco 2397",       type: "credit_card", color: "#fb923c" },
     { userId: uid, name: "Bradesco 2415",       type: "credit_card", color: "#f43f5e" },
-    { userId: uid, name: "Bradesco Corrente",   type: "checking",    color: "#10b981" },
+    { userId: uid, name: "Bradesco Corrente",   type: "checking",    color: "#10b981", isReal: true },
     { userId: uid, name: "Havan",               type: "credit_card", color: "#ef4444" },
-    { userId: uid, name: "Carteira",            type: "cash",        color: "#a3e635" },
-    { userId: uid, name: "Inter (Mariana)",     type: "checking",    color: "#f97316" },
+    { userId: uid, name: "Carteira",            type: "cash",        color: "#a3e635", isReal: true },
+    { userId: uid, name: "Inter (Mariana)",     type: "checking",    color: "#f97316", isReal: true },
     { userId: uid, name: "Apartamento Férias",  type: "investment",  color: "#34d399", currentAmount: "0", showProgress: false },
   ]).returning();
 

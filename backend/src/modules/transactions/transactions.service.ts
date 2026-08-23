@@ -52,6 +52,8 @@ export async function listTransactions(
         eq(transactions.userId, userId),
         eq(transactions.month, month),
         eq(transactions.year, year),
+        eq(transactions.isCarryOver, false),
+        eq(transactions.isInitialBalance, false),
         filters?.type ? eq(transactions.type, filters.type as "income" | "expense" | "transfer") : undefined,
         filters?.categoryId ? eq(transactions.categoryId, filters.categoryId) : undefined,
         filters?.accountId
@@ -78,12 +80,29 @@ export async function listTransactions(
   const accountMap = new Map(accts.map((a) => [a.id, a]));
   const categoryMap = new Map(cats.map((c) => [c.id, c]));
 
-  return rows.map((r) => ({
-      ...r,
-      fromAccount: r.fromAccountId ? accountMap.get(r.fromAccountId) ?? null : null,
-      toAccount: r.toAccountId ? accountMap.get(r.toAccountId) ?? null : null,
-      category: r.categoryId ? categoryMap.get(r.categoryId) ?? null : null,
-    }));
+  const items = rows.map((r) => ({
+    ...r,
+    fromAccount: r.fromAccountId ? accountMap.get(r.fromAccountId) ?? null : null,
+    toAccount: r.toAccountId ? accountMap.get(r.toAccountId) ?? null : null,
+    category: r.categoryId ? categoryMap.get(r.categoryId) ?? null : null,
+  }));
+
+  let income = 0;
+  let expense = 0;
+  for (const r of items) {
+    const amt = parseFloat(r.amount ?? "0");
+    if (r.type === "income") income += amt;
+    else if (r.type === "expense") expense += amt;
+  }
+
+  const invested = items
+    .filter(r => r.type === "transfer" && r.toAccountId && accountMap.get(r.toAccountId)?.type === "investment")
+    .reduce((s, r) => s + parseFloat(r.amount ?? "0"), 0);
+
+  return {
+    items,
+    totals: { income, expense, invested, balance: income - expense - invested },
+  };
 }
 
 export async function createTransaction(userId: number, data: z.infer<typeof transactionSchema>) {
