@@ -2,11 +2,19 @@
 import { ref, computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useThemeStore } from "../stores/theme";
+import { useAuthStore } from "../stores/auth";
 
 const route = useRoute();
 const router = useRouter();
 const theme = useThemeStore();
+const auth = useAuthStore();
 const drawerOpen = ref(false);
+
+async function handleLogout() {
+  drawerOpen.value = false;
+  await auth.logout();
+  router.push("/login");
+}
 
 const mainItems = [
   {
@@ -91,8 +99,8 @@ function navigate(to: string) {
           <span class="text-[10px] font-medium">{{ item.label }}</span>
         </button>
       </div>
-      <!-- Toggle de tema -->
-      <div class="px-4 pb-5 pt-1 border-t border-border mt-1">
+      <!-- Toggle de tema + Logout -->
+      <div class="px-4 pb-5 pt-1 border-t border-border mt-1 flex flex-col gap-2">
         <button
           type="button"
           @click="theme.toggle()"
@@ -105,6 +113,16 @@ function navigate(to: string) {
             <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
           </svg>
           <span class="text-sm font-medium">{{ theme.isDark ? 'Mudar para tema claro' : 'Mudar para tema escuro' }}</span>
+        </button>
+        <button
+          type="button"
+          @click="handleLogout"
+          class="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 transition-colors active:scale-95"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+          </svg>
+          <span class="text-sm font-medium">Sair</span>
         </button>
       </div>
     </div>
