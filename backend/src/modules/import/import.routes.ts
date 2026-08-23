@@ -39,7 +39,8 @@ router.post(
   "/ofx/confirm",
   asyncHandler(async (req: AuthRequest, res) => {
     const { items, accountId } = confirmSchema.parse(req.body);
-    const imported = await confirmOFX(req.userId!, items, accountId);
+    const normalized = items.map(i => ({ ...i, categoryId: i.categoryId ?? null, toAccountId: i.toAccountId ?? null }));
+    const imported = await confirmOFX(req.userId!, normalized, accountId);
     res.json({ imported });
   })
 );
