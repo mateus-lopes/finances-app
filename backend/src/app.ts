@@ -50,7 +50,7 @@ app.use(
     res: express.Response,
     _next: express.NextFunction
   ) => {
-    if (env.NODE_ENV !== "production") console.error(err);
+    console.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 );
