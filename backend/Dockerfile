@@ -8,10 +8,8 @@ RUN npm install --include=dev
 
 COPY . .
 
-RUN npm run db:migrate
-
 RUN npm run build
 
 EXPOSE 3000
 
-CMD ["npm", "run", "start"]
+CMD ["sh", "-c", "npm run db:migrate && npm run start"]
