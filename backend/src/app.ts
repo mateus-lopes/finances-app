@@ -16,6 +16,8 @@ import importRoutes from "./modules/import/import.routes";
 
 const app = express();
 
+app.set("trust proxy", 1);
+
 const allowedOrigins = env.CORS_ORIGIN.split(",").map((o) => o.trim());
 
 app.use(helmet());
