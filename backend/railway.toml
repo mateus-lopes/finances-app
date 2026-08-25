@@ -3,6 +3,6 @@ builder = "nixpacks"
 buildCommand = "npm install --include=dev && npm run build"
 
 [deploy]
-startCommand = "npm run db:migrate && npm run start"
+startCommand = "sh -c \"echo '=== MIGRATION START ===' && npm run db:migrate && echo '=== MIGRATION OK ===' && echo '=== SERVER START ===' && node --trace-uncaught-exceptions dist/server.js\""
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
