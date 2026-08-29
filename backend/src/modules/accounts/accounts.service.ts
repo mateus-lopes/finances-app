@@ -83,32 +83,6 @@ export async function deleteAccount(userId: number, id: number) {
   return account ?? null;
 }
 
-export async function getAccountBalance(userId: number, accountId: number): Promise<number> {
-  const [account] = await db
-    .select()
-    .from(accounts)
-    .where(and(eq(accounts.id, accountId), eq(accounts.userId, userId)));
-
-  if (!account) return 0;
-
-  if (account.type === "investment") {
-    return parseFloat(account.currentAmount ?? "0");
-  }
-
-  const [inResult] = await db
-    .select({ total: sum(transactions.amount) })
-    .from(transactions)
-    .where(and(eq(transactions.toAccountId, accountId), eq(transactions.userId, userId)));
-
-  const [outResult] = await db
-    .select({ total: sum(transactions.amount) })
-    .from(transactions)
-    .where(and(eq(transactions.fromAccountId, accountId), eq(transactions.userId, userId)));
-
-  const inflow = parseFloat(inResult?.total ?? "0");
-  const outflow = parseFloat(outResult?.total ?? "0");
-  return inflow - outflow;
-}
 
 const LIQUID_TYPES = ["checking", "savings", "cash"] as const;
 

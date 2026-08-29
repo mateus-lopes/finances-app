@@ -95,7 +95,7 @@ const selectClass = "flex h-10 w-full rounded-lg border border-input bg-secondar
           {{ form.type === 'transfer' ? 'De' : 'Conta de débito' }}
         </label>
         <select v-model="form.fromAccountId" :class="selectClass">
-          <option value="">Não especificar</option>
+          <option value="" disabled>Selecione a conta</option>
           <option
             v-for="acc in accountsStore.accounts.filter(a => ['checking','savings','cash','credit_card'].includes(a.type))"
             :key="acc.id" :value="String(acc.id)"
@@ -108,7 +108,7 @@ const selectClass = "flex h-10 w-full rounded-lg border border-input bg-secondar
           {{ form.type === 'transfer' ? 'Para' : 'Conta de crédito' }}
         </label>
         <select v-model="form.toAccountId" :class="selectClass">
-          <option value="">Não especificar</option>
+          <option value="" disabled>Selecione a conta</option>
           <option
             v-for="acc in accountsStore.accounts.filter(a => ['checking','savings','cash','investment'].includes(a.type))"
             :key="acc.id" :value="String(acc.id)"
@@ -125,7 +125,7 @@ const selectClass = "flex h-10 w-full rounded-lg border border-input bg-secondar
         <button
           type="button"
           @click="submit"
-          :disabled="submitting || !form.amount || !form.description"
+          :disabled="submitting || !form.amount || !form.description || (form.type === 'expense' && !form.fromAccountId) || (form.type === 'income' && !form.toAccountId) || (form.type === 'transfer' && (!form.fromAccountId || !form.toAccountId))"
           class="flex-1 h-10 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
         >
           <svg v-if="submitting" class="animate-spin size-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">

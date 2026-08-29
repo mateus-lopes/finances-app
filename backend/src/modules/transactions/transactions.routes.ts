@@ -7,6 +7,7 @@ import {
   createTransaction,
   updateTransaction,
   deleteTransaction,
+  autoCategorizeByHistory,
   transactionSchema,
 } from "./transactions.service";
 
@@ -19,6 +20,7 @@ const querySchema = z.object({
   type: z.string().optional(),
   accountId: z.coerce.number().int().optional(),
   categoryId: z.coerce.number().int().optional(),
+  uncategorized: z.string().transform(v => v === "true").optional(),
 });
 
 router.get(
@@ -28,6 +30,19 @@ router.get(
     if (!parsed.success) { res.status(400).json({ error: "month e year são obrigatórios" }); return; }
     const { month, year, ...filters } = parsed.data;
     res.json(await listTransactions(req.userId!, month, year, filters));
+  })
+);
+
+router.post(
+  "/auto-categorize",
+  asyncHandler(async (req: AuthRequest, res) => {
+    const parsed = z.object({
+      month: z.coerce.number().int().min(1).max(12),
+      year: z.coerce.number().int().min(2000),
+    }).safeParse(req.body);
+    if (!parsed.success) { res.status(400).json({ error: "month e year são obrigatórios" }); return; }
+    const result = await autoCategorizeByHistory(req.userId!, parsed.data.month, parsed.data.year);
+    res.json(result);
   })
 );
 

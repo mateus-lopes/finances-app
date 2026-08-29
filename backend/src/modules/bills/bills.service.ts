@@ -285,24 +285,9 @@ export async function toggleOccurrencePaid(userId: number, occurrenceId: number)
       .set({ transactionId: tx.id })
       .where(eq(billOccurrences.id, occurrenceId));
 
-    // Para investimentos: atualiza currentAmount ao aportar
-    if (bill.type === "transfer" && bill.toAccountId) {
-      await db
-        .update(accounts)
-        .set({ currentAmount: sql`current_amount + ${parseFloat(occ.amount)}` })
-        .where(eq(accounts.id, bill.toAccountId));
-    }
-
     return { ...updated, transactionId: tx.id };
   } else {
     if (occ.transactionId) {
-      // Para investimentos: reverte o currentAmount ao desmarcar
-      if (bill.type === "transfer" && bill.toAccountId) {
-        await db
-          .update(accounts)
-          .set({ currentAmount: sql`current_amount - ${parseFloat(occ.amount)}` })
-          .where(eq(accounts.id, bill.toAccountId));
-      }
       await db.delete(transactions).where(eq(transactions.id, occ.transactionId));
       const [cleared] = await db
         .update(billOccurrences)
