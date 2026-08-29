@@ -41,6 +41,7 @@ async function submit() {
       toAccountId: form.value.toAccountId ? parseInt(form.value.toAccountId) : null,
     });
     success("Transação criada!");
+    window.dispatchEvent(new CustomEvent("transaction:created"));
     emit("close");
   } catch {
     error("Erro ao salvar", "Tente novamente.");

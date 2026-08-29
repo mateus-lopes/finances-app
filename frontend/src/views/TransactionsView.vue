@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, computed } from "vue";
+import { ref, onMounted, onUnmounted, watch, computed } from "vue";
 import { useMonthStore } from "../stores/month";
 import { useAccountsStore } from "../stores/accounts";
 import { useToast } from "../composables/useToast";
@@ -65,7 +65,11 @@ async function loadCategories() {
   } catch {}
 }
 
-onMounted(async () => { await Promise.all([load(), accountsStore.loadAccounts(), loadCategories()]); });
+onMounted(async () => {
+  await Promise.all([load(), accountsStore.loadAccounts(), loadCategories()]);
+  window.addEventListener("transaction:created", load);
+});
+onUnmounted(() => window.removeEventListener("transaction:created", load));
 watch([() => monthStore.month, () => monthStore.year], load);
 
 function fmt(v: string | number) {

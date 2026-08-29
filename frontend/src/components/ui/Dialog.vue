@@ -22,6 +22,9 @@ const emit = defineEmits<{ "update:open": [value: boolean] }>();
         />
         <!-- Panel -->
         <div
+          role="dialog"
+          aria-modal="true"
+          :aria-label="title"
           :class="cn(
             'relative z-10 w-full sm:max-w-md bg-popover border border-border rounded-t-2xl sm:rounded-2xl p-6 shadow-2xl',
             'max-h-[90dvh] overflow-y-auto',
