@@ -4,12 +4,28 @@ import { transactions, bills, billOccurrences, accounts, categories } from "../.
 import { ensureOccurrencesForMonth } from "../bills/bills.service";
 import { getAllInvoicesForMonth, getRealBalance, listAccountsWithBalances } from "../accounts/accounts.service";
 
+async function queryMonthSums(userId: number, month: number, year: number) {
+  const [incomeResult, expenseResult] = await Promise.all([
+    db
+      .select({ total: sum(transactions.amount) })
+      .from(transactions)
+      .where(and(eq(transactions.userId, userId), eq(transactions.month, month), eq(transactions.year, year), eq(transactions.type, "income"))),
+    db
+      .select({ total: sum(transactions.amount) })
+      .from(transactions)
+      .where(and(eq(transactions.userId, userId), eq(transactions.month, month), eq(transactions.year, year), eq(transactions.type, "expense"))),
+  ]);
+  return {
+    income: parseFloat(incomeResult[0]?.total ?? "0"),
+    expenses: parseFloat(expenseResult[0]?.total ?? "0"),
+  };
+}
+
 export async function getDashboard(userId: number, month: number, year: number) {
   await ensureOccurrencesForMonth(userId, month, year);
 
   const [
-    txIncomeResult,
-    txExpenseResult,
+    { income: totalIncome, expenses: totalExpenses },
     txRows,
     txTransfers,
     pendingOccurrences,
@@ -18,15 +34,7 @@ export async function getDashboard(userId: number, month: number, year: number) 
     investmentBillOccs,
     realBalance,
   ] = await Promise.all([
-    db
-      .select({ total: sum(transactions.amount) })
-      .from(transactions)
-      .where(and(eq(transactions.userId, userId), eq(transactions.month, month), eq(transactions.year, year), eq(transactions.type, "income"))),
-
-    db
-      .select({ total: sum(transactions.amount) })
-      .from(transactions)
-      .where(and(eq(transactions.userId, userId), eq(transactions.month, month), eq(transactions.year, year), eq(transactions.type, "expense"))),
+    queryMonthSums(userId, month, year),
 
     db
       .select({ categoryId: transactions.categoryId, amount: transactions.amount })
@@ -72,9 +80,6 @@ export async function getDashboard(userId: number, month: number, year: number) 
   ]);
 
   const accountsData = await listAccountsWithBalances(userId, month, year);
-
-  const totalIncome = parseFloat(txIncomeResult[0]?.total ?? "0");
-  const totalExpenses = parseFloat(txExpenseResult[0]?.total ?? "0");
 
   const investmentIds = new Set(investments.map(inv => inv.id));
   const invested = txTransfers
@@ -166,18 +171,7 @@ export async function getDashboard(userId: number, month: number, year: number) 
 }
 
 export async function getMonthStats(userId: number, month: number, year: number) {
-  const [incomeResult, expenseResult] = await Promise.all([
-    db
-      .select({ total: sum(transactions.amount) })
-      .from(transactions)
-      .where(and(eq(transactions.userId, userId), eq(transactions.month, month), eq(transactions.year, year), eq(transactions.type, "income"))),
-    db
-      .select({ total: sum(transactions.amount) })
-      .from(transactions)
-      .where(and(eq(transactions.userId, userId), eq(transactions.month, month), eq(transactions.year, year), eq(transactions.type, "expense"))),
-  ]);
-  const income = parseFloat(incomeResult[0]?.total ?? "0");
-  const expenses = parseFloat(expenseResult[0]?.total ?? "0");
+  const { income, expenses } = await queryMonthSums(userId, month, year);
   const saldo = income - expenses;
   return { month, year, income, expenses, saldo, savingsRate: income > 0 ? (saldo / income) * 100 : 0 };
 }
