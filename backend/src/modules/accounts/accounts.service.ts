@@ -199,85 +199,31 @@ export async function toggleInvoicePaid(
   accountId: number,
   month: number,
   year: number,
-  fromAccountId: number | null,
 ) {
-  const [account] = await db
-    .select({ name: accounts.name })
-    .from(accounts)
-    .where(and(eq(accounts.id, accountId), eq(accounts.userId, userId)));
-
   const [existing] = await db
     .select()
     .from(creditCardInvoices)
-    .where(
-      and(
-        eq(creditCardInvoices.accountId, accountId),
-        eq(creditCardInvoices.userId, userId),
-        eq(creditCardInvoices.month, month),
-        eq(creditCardInvoices.year, year)
-      )
-    );
+    .where(and(
+      eq(creditCardInvoices.accountId, accountId),
+      eq(creditCardInvoices.userId, userId),
+      eq(creditCardInvoices.month, month),
+      eq(creditCardInvoices.year, year)
+    ));
 
   const nowPaid = !existing?.paid;
-
-  if (!nowPaid) {
-    // Desmarcar: deletar transação de pagamento se existir
-    if (existing?.paymentTransactionId) {
-      await db.delete(transactions).where(eq(transactions.id, existing.paymentTransactionId));
-    }
-    const [updated] = await db
-      .update(creditCardInvoices)
-      .set({ paid: false, paidAt: null, paymentTransactionId: null })
-      .where(eq(creditCardInvoices.id, existing!.id))
-      .returning();
-    return updated;
-  }
-
-  // Marcar como pago
-  let paymentTransactionId: number | null = null;
-
-  if (fromAccountId) {
-    // Calcular valor da fatura
-    const [amountResult] = await db
-      .select({ total: sum(transactions.amount) })
-      .from(transactions)
-      .where(and(
-        eq(transactions.fromAccountId, accountId),
-        eq(transactions.userId, userId),
-        eq(transactions.month, month),
-        eq(transactions.year, year),
-        eq(transactions.type, "expense"),
-      ));
-    const amount = parseFloat(amountResult?.total ?? "0");
-
-    if (amount > 0) {
-      const mm = String(month).padStart(2, "0");
-      const [tx] = await db.insert(transactions).values({
-        userId,
-        type: "transfer",
-        fromAccountId,
-        toAccountId: accountId,
-        amount: String(amount.toFixed(2)),
-        date: `${year}-${mm}-01`,
-        month,
-        year,
-        description: `Pagamento fatura ${account?.name ?? "cartão"}`,
-      }).returning();
-      paymentTransactionId = tx.id;
-    }
-  }
+  const set = { paid: nowPaid, paidAt: nowPaid ? new Date() : null };
 
   if (!existing) {
     const [created] = await db
       .insert(creditCardInvoices)
-      .values({ accountId, userId, month, year, paid: true, paidAt: new Date(), paymentTransactionId })
+      .values({ accountId, userId, month, year, ...set })
       .returning();
     return created;
   }
 
   const [updated] = await db
     .update(creditCardInvoices)
-    .set({ paid: true, paidAt: new Date(), paymentTransactionId })
+    .set(set)
     .where(eq(creditCardInvoices.id, existing.id))
     .returning();
   return updated;

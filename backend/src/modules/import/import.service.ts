@@ -106,6 +106,8 @@ export function parseOFX(content: string): ParsedTransaction[] {
     const raw = parseFloat(trnamt.replace(",", "."));
     if (isNaN(raw) || !memo || !dtposted) continue;
     if (INFORMATIONAL.some(re => re.test(memo))) continue;
+    // Artefato do BB: OUROCARD aparece como crédito espelho do débito da fatura
+    if (raw >= 0 && /ourocard/i.test(memo)) continue;
 
     const date = parseOFXDate(dtposted);
     if (!date) continue;

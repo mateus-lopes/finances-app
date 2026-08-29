@@ -1,7 +1,7 @@
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../../db/client";
-import { bills, billOccurrences, accounts, categories, transactions, BILL_TYPES, BILL_FREQUENCIES } from "../../db/schema";
+import { bills, billOccurrences, accounts, categories, BILL_TYPES, BILL_FREQUENCIES } from "../../db/schema";
 
 export const billSchema = z.object({
   name: z.string().min(1).max(150),
@@ -245,58 +245,19 @@ export async function deleteBill(userId: number, id: number) {
 }
 
 export async function toggleOccurrencePaid(userId: number, occurrenceId: number) {
-  const [occurrence] = await db
-    .select({ occ: billOccurrences, bill: bills })
+  const [occ] = await db
+    .select()
     .from(billOccurrences)
-    .innerJoin(bills, eq(billOccurrences.billId, bills.id))
     .where(and(eq(billOccurrences.id, occurrenceId), eq(billOccurrences.userId, userId)));
 
-  if (!occurrence) return null;
+  if (!occ) return null;
 
-  const { occ, bill } = occurrence;
   const nowPaid = !occ.paid;
-  const paidAt = nowPaid ? new Date() : null;
-
   const [updated] = await db
     .update(billOccurrences)
-    .set({ paid: nowPaid, paidAt })
+    .set({ paid: nowPaid, paidAt: nowPaid ? new Date() : null })
     .where(eq(billOccurrences.id, occurrenceId))
     .returning();
-
-  if (nowPaid) {
-    const [tx] = await db
-      .insert(transactions)
-      .values({
-        userId,
-        type: bill.type,
-        fromAccountId: bill.fromAccountId ?? null,
-        toAccountId: bill.toAccountId ?? null,
-        amount: occ.amount,
-        date: occ.dueDate,
-        month: occ.month,
-        year: occ.year,
-        description: bill.name,
-        billId: bill.id,
-      })
-      .returning();
-
-    await db
-      .update(billOccurrences)
-      .set({ transactionId: tx.id })
-      .where(eq(billOccurrences.id, occurrenceId));
-
-    return { ...updated, transactionId: tx.id };
-  } else {
-    if (occ.transactionId) {
-      await db.delete(transactions).where(eq(transactions.id, occ.transactionId));
-      const [cleared] = await db
-        .update(billOccurrences)
-        .set({ transactionId: null })
-        .where(eq(billOccurrences.id, occurrenceId))
-        .returning();
-      return cleared;
-    }
-  }
 
   return updated;
 }

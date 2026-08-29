@@ -83,10 +83,9 @@ router.patch(
     const parsed = z.object({
       month: z.coerce.number().int().min(1).max(12),
       year: z.coerce.number().int().min(2000),
-      fromAccountId: z.number().int().positive().optional().nullable(),
     }).safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: "month e year são obrigatórios" }); return; }
-    const result = await toggleInvoicePaid(req.userId!, id, parsed.data.month, parsed.data.year, parsed.data.fromAccountId ?? null);
+    const result = await toggleInvoicePaid(req.userId!, id, parsed.data.month, parsed.data.year);
     res.json(result);
   })
 );

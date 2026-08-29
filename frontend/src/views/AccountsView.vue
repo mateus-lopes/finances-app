@@ -28,11 +28,6 @@ const editForm = ref({ name: "", type: "checking" as Account["type"], color: "#8
 const deleteDialog = ref(false);
 const deletingAccount = ref<{ id: number; name: string } | null>(null);
 
-// Dialog de pagamento de fatura
-const payDialog = ref(false);
-const paySubmitting = ref(false);
-const payingCard = ref<{ id: number; name: string; amount: number } | null>(null);
-const payFromAccountId = ref<string>("");
 
 const typeOptions = [
   { value: "checking", label: "Conta Corrente" },
@@ -98,34 +93,14 @@ async function loadInvoice(accountId: number) {
 }
 
 function handleCardClick(cc: Account & { balance: number }) {
-  const key = `${cc.id}-${monthStore.month}-${monthStore.year}`;
-  const inv = invoiceCache.value[key];
-  if (inv?.paid) {
-    toggleInvoice(cc.id, null);
-  } else {
-    payingCard.value = { id: cc.id, name: cc.name, amount: inv?.amount ?? 0 };
-    payFromAccountId.value = String(checkingAccounts.value[0]?.id ?? "");
-    payDialog.value = true;
-  }
+  toggleInvoice(cc.id);
 }
 
-async function confirmPayment() {
-  if (!payingCard.value || !payFromAccountId.value) return;
-  paySubmitting.value = true;
-  try {
-    await toggleInvoice(payingCard.value.id, parseInt(payFromAccountId.value));
-    payDialog.value = false;
-  } finally {
-    paySubmitting.value = false;
-  }
-}
-
-async function toggleInvoice(accountId: number, fromAccountId: number | null) {
+async function toggleInvoice(accountId: number) {
   try {
     await api.patch(`/accounts/${accountId}/invoice/pay`, {
       month: monthStore.month,
       year: monthStore.year,
-      fromAccountId,
     });
     const key = `${accountId}-${monthStore.month}-${monthStore.year}`;
     delete invoiceCache.value[key];
@@ -472,28 +447,5 @@ async function executeDelete() {
       </div>
     </Dialog>
 
-    <!-- Dialog pagamento de fatura -->
-    <Dialog :open="payDialog" :title="`Pagar fatura — ${payingCard?.name}`" @update:open="payDialog = $event">
-      <div class="space-y-4">
-        <div class="rounded-lg bg-secondary/60 px-4 py-3 flex justify-between items-center">
-          <span class="text-sm text-muted-foreground">Valor da fatura</span>
-          <span class="text-lg font-bold text-rose-400">{{ fmt(payingCard?.amount ?? 0) }}</span>
-        </div>
-        <div>
-          <label class="text-xs text-muted-foreground block mb-1">Pagar de qual conta?</label>
-          <select v-model="payFromAccountId" :class="selectClass">
-            <option v-for="acc in checkingAccounts" :key="acc.id" :value="String(acc.id)">{{ acc.name }}</option>
-          </select>
-        </div>
-        <p class="text-xs text-muted-foreground">O valor será lançado como transferência saindo da conta selecionada.</p>
-        <div class="flex gap-2 pt-1">
-          <button type="button" @click="payDialog = false" class="flex-1 h-9 rounded-lg border border-border text-sm text-foreground hover:bg-secondary transition-colors">Cancelar</button>
-          <button type="button" @click="confirmPayment" :disabled="paySubmitting || !payFromAccountId" class="flex-1 h-9 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
-            <svg v-if="paySubmitting" class="animate-spin size-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-            Confirmar pagamento
-          </button>
-        </div>
-      </div>
-    </Dialog>
   </div>
 </template>
