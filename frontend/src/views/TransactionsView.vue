@@ -30,6 +30,8 @@ const loading = ref(false);
 const showDialog = ref(false);
 const submitting = ref(false);
 const hoverCat = ref<number | null>(null);
+const editingCategoryTxId = ref<number | null>(null);
+const savingCategoryTxId = ref<number | null>(null);
 const categories = ref<{ id: number; name: string; color: string | null }[]>([]);
 
 const form = ref({
@@ -105,6 +107,24 @@ async function remove(id: number) {
   } catch { error("Erro ao remover"); }
 }
 
+async function saveCategory(tx: Transaction, categoryId: string) {
+  savingCategoryTxId.value = tx.id;
+  try {
+    await api.put(`/transactions/${tx.id}`, {
+      type: tx.type,
+      amount: parseFloat(tx.amount),
+      date: tx.date,
+      description: tx.description,
+      fromAccountId: tx.fromAccount?.id ?? null,
+      toAccountId: tx.toAccount?.id ?? null,
+      categoryId: categoryId ? parseInt(categoryId) : null,
+    });
+    editingCategoryTxId.value = null;
+    await load();
+  } catch { error("Erro ao salvar categoria"); }
+  finally { savingCategoryTxId.value = null; }
+}
+
 const typeIcon: Record<string, string> = {
   income: `<path d="M7 17L17 7M17 7H7M17 7v10"/>`,
   expense: `<path d="M17 7L7 17M7 17h10M7 17V7"/>`,
@@ -116,10 +136,43 @@ const typeColor: Record<string, string> = {
   transfer: "bg-blue-500/15 text-blue-400",
 };
 
-const totalIncome = computed(() => totals.value.income);
-const totalExpense = computed(() => totals.value.expense);
-const totalInvested = computed(() => totals.value.invested ?? 0);
-const saldoMes = computed(() => totals.value.balance);
+const filterType = ref<"" | "income" | "expense" | "transfer">("");
+const filterCategory = ref<string>("");
+
+const hasFilters = computed(() => filterType.value !== "" || filterCategory.value !== "");
+
+const filteredTransactions = computed(() => {
+  return transactions.value.filter(tx => {
+    if (filterType.value && tx.type !== filterType.value) return false;
+    if (filterCategory.value === "__none__") return tx.category === null;
+    if (filterCategory.value && tx.category?.id !== parseInt(filterCategory.value)) return false;
+    return true;
+  });
+});
+
+function clearFilters() {
+  filterType.value = "";
+  filterCategory.value = "";
+}
+
+const totalIncome = computed(() => {
+  if (!hasFilters.value) return totals.value.income;
+  return filteredTransactions.value.filter(t => t.type === "income").reduce((s, t) => s + Number(t.amount), 0);
+});
+const totalExpense = computed(() => {
+  if (!hasFilters.value) return totals.value.expense;
+  return filteredTransactions.value.filter(t => t.type === "expense").reduce((s, t) => s + Number(t.amount), 0);
+});
+const totalInvested = computed(() => {
+  if (!hasFilters.value) return totals.value.invested ?? 0;
+  return filteredTransactions.value
+    .filter(t => t.type === "transfer")
+    .reduce((s, t) => s + Number(t.amount), 0);
+});
+const saldoMes = computed(() => {
+  if (!hasFilters.value) return totals.value.balance;
+  return totalIncome.value - totalExpense.value;
+});
 </script>
 
 <template>
@@ -164,17 +217,56 @@ const saldoMes = computed(() => totals.value.balance);
       </template>
     </div>
 
+    <!-- Filtros -->
+    <div v-if="!loading" class="flex flex-wrap gap-2 mb-4">
+      <select
+        v-model="filterType"
+        class="h-8 rounded-lg border border-border bg-card px-2.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring cursor-pointer"
+      >
+        <option value="">Todos os tipos</option>
+        <option value="expense">Despesas</option>
+        <option value="income">Receitas</option>
+        <option value="transfer">Transferências</option>
+      </select>
+
+      <select
+        v-if="categories.length"
+        v-model="filterCategory"
+        class="h-8 rounded-lg border border-border bg-card px-2.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring cursor-pointer"
+      >
+        <option value="">Todas as categorias</option>
+        <option value="__none__">Sem categoria</option>
+        <option v-for="c in categories" :key="c.id" :value="String(c.id)">{{ c.name }}</option>
+      </select>
+
+      <button
+        v-if="hasFilters"
+        type="button"
+        @click="clearFilters"
+        class="h-8 px-2.5 rounded-lg border border-border text-xs text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors flex items-center gap-1.5"
+      >
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+        Limpar
+      </button>
+
+      <span v-if="hasFilters" class="ml-auto text-xs text-muted-foreground self-center">
+        {{ filteredTransactions.length }} de {{ transactions.length }}
+      </span>
+    </div>
+
     <template v-if="loading">
       <Skeleton class="h-16 w-full mb-2" v-for="i in 5" :key="i" />
     </template>
 
     <template v-else>
       <!-- Transações do mês -->
-      <template v-if="transactions.length">
+      <template v-if="filteredTransactions.length">
         <p class="section-label mb-2">Transações</p>
         <div class="rounded-xl border border-border bg-card overflow-hidden">
           <div
-            v-for="(tx, i) in transactions"
+            v-for="(tx, i) in filteredTransactions"
             :key="tx.id"
             class="flex items-center gap-3 px-4 py-3 group"
             :class="{ 'border-t border-border': i > 0 }"
@@ -183,23 +275,56 @@ const saldoMes = computed(() => totals.value.balance);
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" v-html="typeIcon[tx.type]" />
             </div>
             <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-1.5">
-                <span
-                  v-if="tx.category"
-                  class="w-2 h-2 rounded-full flex-shrink-0 cursor-default"
-                  :style="{ background: tx.category.color ?? '#8b5cf6' }"
-                  @mouseenter="hoverCat = tx.id"
-                  @mouseleave="hoverCat = null"
-                  @click.stop="hoverCat = hoverCat === tx.id ? null : tx.id"
-                />
-                <p class="text-sm font-medium text-foreground truncate">{{ tx.description }}</p>
-              </div>
+              <p class="text-sm font-medium text-foreground truncate">{{ tx.description }}</p>
+
               <div class="flex items-center gap-1.5 mt-0.5">
                 <span v-if="tx.fromAccount" class="text-xs text-muted-foreground">{{ tx.fromAccount.name }}</span>
-                <span v-else-if="tx.toAccount" class="text-xs text-muted-foreground">{{ tx.toAccount.name }}</span>
-                <span v-if="tx.fromAccount && tx.toAccount" class="text-xs text-muted-foreground">→ {{ tx.toAccount.name }}</span>
+                <span v-if="tx.fromAccount && tx.toAccount" class="text-xs text-muted-foreground">→</span>
+                <span v-if="tx.toAccount" class="text-xs text-muted-foreground">{{ tx.toAccount.name }}</span>
               </div>
-              <p v-if="tx.category && hoverCat === tx.id" class="text-xs mt-0.5 uppercase tracking-wide" :style="{ color: tx.category.color ?? '#8b5cf6' }">{{ tx.category.name }}</p>
+
+              <!-- Categoria inline -->
+              <div class="mt-1">
+                <!-- Editando -->
+                <div v-if="editingCategoryTxId === tx.id" class="flex items-center gap-1.5">
+                  <select
+                    :disabled="savingCategoryTxId === tx.id"
+                    :value="tx.category ? String(tx.category.id) : ''"
+                    @change="saveCategory(tx, ($event.target as HTMLSelectElement).value)"
+                    @blur="editingCategoryTxId = null"
+                    class="h-6 rounded-md border border-primary/40 bg-secondary px-1.5 text-[11px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+                    autofocus
+                  >
+                    <option value="">Sem categoria</option>
+                    <option v-for="c in categories" :key="c.id" :value="String(c.id)">{{ c.name }}</option>
+                  </select>
+                  <svg v-if="savingCategoryTxId === tx.id" class="animate-spin text-muted-foreground" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 12a9 9 0 11-6.219-8.56"/>
+                  </svg>
+                  <button type="button" @mousedown.prevent="editingCategoryTxId = null" class="text-muted-foreground hover:text-foreground">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                  </button>
+                </div>
+
+                <!-- Exibindo -->
+                <button
+                  v-else
+                  type="button"
+                  @click.stop="editingCategoryTxId = tx.id"
+                  class="flex items-center gap-1 group/cat"
+                  :title="tx.category ? 'Mudar categoria' : 'Adicionar categoria'"
+                >
+                  <span v-if="tx.category" class="w-2 h-2 rounded-full flex-shrink-0" :style="{ background: tx.category.color ?? '#8b5cf6' }" />
+                  <span
+                    class="text-[11px] transition-colors"
+                    :class="tx.category
+                      ? 'text-muted-foreground group-hover/cat:text-foreground'
+                      : 'text-amber-500/70 group-hover/cat:text-amber-500'"
+                  >
+                    {{ tx.category ? tx.category.name : '+ categoria' }}
+                  </span>
+                </button>
+              </div>
             </div>
             <div class="flex flex-col items-end gap-1">
               <span class="text-sm font-semibold tabular-nums" :class="tx.type === 'income' ? 'text-emerald-400' : tx.type === 'expense' ? 'text-rose-400' : 'text-blue-400'">
@@ -219,6 +344,11 @@ const saldoMes = computed(() => totals.value.balance);
           </div>
         </div>
       </template>
+
+      <div v-else-if="hasFilters" class="py-12 text-center text-sm text-muted-foreground">
+        Nenhuma transação com esses filtros.
+        <button type="button" @click="clearFilters" class="text-primary underline ml-1">Limpar filtros</button>
+      </div>
 
       <div v-else class="flex flex-col items-center justify-center py-20 text-center">
         <div class="w-14 h-14 rounded-2xl bg-secondary flex items-center justify-center mb-3">

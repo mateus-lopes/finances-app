@@ -8,6 +8,7 @@ const router = createRouter({
     { path: "/redefinir-senha", component: () => import("../views/ResetPasswordView.vue"), meta: { public: true } },
     { path: "/", component: () => import("../views/DashboardView.vue") },
     { path: "/transacoes", component: () => import("../views/TransactionsView.vue") },
+    { path: "/gastos", component: () => import("../views/GastosView.vue") },
     { path: "/recorrentes", component: () => import("../views/BillsView.vue") },
     { path: "/contas", component: () => import("../views/AccountsView.vue") },
     { path: "/categorias", component: () => import("../views/CategoriesView.vue") },

@@ -12,9 +12,11 @@ const route = useRoute();
 const PAGE_TITLES: Record<string, string> = {
   "/": "Dashboard",
   "/transacoes": "Transações",
+  "/gastos": "Gastos",
   "/recorrentes": "Recorrentes",
   "/contas": "Contas",
   "/categorias": "Categorias",
+  "/importar": "Importar OFX",
 };
 </script>
 

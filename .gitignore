@@ -8,3 +8,5 @@ build/
 .vscode/
 coverage/
 .claude/
+frontend/playwright-report/
+frontend/test-results/

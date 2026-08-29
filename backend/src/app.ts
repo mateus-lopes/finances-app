@@ -10,9 +10,8 @@ import accountsRoutes from "./modules/accounts/accounts.routes";
 import transactionsRoutes from "./modules/transactions/transactions.routes";
 import billsRoutes from "./modules/bills/bills.routes";
 import dashboardRoutes from "./modules/dashboard/dashboard.routes";
-import analyticsRoutes from "./modules/analytics/analytics.routes";
-import goalsRoutes from "./modules/goals/goals.routes";
 import importRoutes from "./modules/import/import.routes";
+import categorizerRoutes from "./modules/categorizer/categorizer.routes";
 
 const app = express();
 
@@ -39,9 +38,8 @@ app.use("/api/accounts", accountsRoutes);
 app.use("/api/transactions", transactionsRoutes);
 app.use("/api/bills", billsRoutes);
 app.use("/api/dashboard", dashboardRoutes);
-app.use("/api/analytics", analyticsRoutes);
-app.use("/api/goals", goalsRoutes);
 app.use("/api/import", importRoutes);
+app.use("/api/categorizer", categorizerRoutes);
 
 app.use(
   (
