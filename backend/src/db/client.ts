@@ -1,6 +1,6 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
-import { env } from "../config/env";
+import { env } from "../shared/infrastructure/config/env";
 import * as schema from "./schema";
 
 const isTest = env.NODE_ENV === "test";
@@ -18,3 +18,4 @@ pool.on("error", (err) => {
 });
 
 export const db = drizzle(pool, { schema });
+export type Database = typeof db;

@@ -2,12 +2,9 @@ import { pgTable, serial, text, integer, boolean, numeric, date, timestamp, uniq
 import { users } from "./users";
 import { accounts } from "./accounts";
 import { categories } from "./categories";
+import type { BillFrequency, BillType } from "../../modules/planning/domain/bill";
 
-export const BILL_TYPES = ["income", "expense", "transfer"] as const;
-export type BillType = (typeof BILL_TYPES)[number];
-
-export const BILL_FREQUENCIES = ["monthly", "weekly", "biweekly", "quarterly", "yearly"] as const;
-export type BillFrequency = (typeof BILL_FREQUENCIES)[number];
+export { BILL_TYPES, BILL_FREQUENCIES, type BillType, type BillFrequency } from "../../modules/planning/domain/bill";
 
 export const bills = pgTable("bills", {
   id: serial("id").primaryKey(),

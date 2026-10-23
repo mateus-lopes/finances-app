@@ -1,0 +1,4 @@
+# devDependencies são necessárias no build (vite, tsc, drizzle-kit),
+# mesmo com NODE_ENV=production definido no serviço.
+[phases.install]
+cmds = ["pnpm install --frozen-lockfile --prod=false"]

@@ -1,8 +1,8 @@
 import { pgTable, serial, text, integer, boolean, numeric, timestamp, index } from "drizzle-orm/pg-core";
 import { users } from "./users";
+import type { AccountType } from "../../modules/ledger/domain/account";
 
-export const ACCOUNT_TYPES = ["checking", "savings", "cash", "credit_card", "investment"] as const;
-export type AccountType = (typeof ACCOUNT_TYPES)[number];
+export { ACCOUNT_TYPES, type AccountType } from "../../modules/ledger/domain/account";
 
 export const accounts = pgTable("accounts", {
   id: serial("id").primaryKey(),

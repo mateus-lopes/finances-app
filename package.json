@@ -1,10 +1,19 @@
 {
   "name": "controle-de-gastos",
   "private": true,
+  "packageManager": "pnpm@11.11.0",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
+    "dev": "pnpm --parallel --filter @cg/backend --filter @cg/frontend dev",
     "dev:backend": "pnpm --filter @cg/backend dev",
     "dev:frontend": "pnpm --filter @cg/frontend dev",
-    "build:backend": "pnpm --filter @cg/backend build",
-    "build:frontend": "pnpm --filter @cg/frontend build"
+    "build": "pnpm --filter @cg/frontend build && pnpm --filter @cg/backend build",
+    "start": "pnpm --filter @cg/backend db:migrate && pnpm --filter @cg/backend start",
+    "typecheck": "pnpm --filter @cg/backend typecheck && pnpm --filter @cg/frontend typecheck",
+    "lint:arch": "pnpm --filter @cg/backend lint:arch",
+    "test": "pnpm --filter @cg/backend test:run",
+    "test:e2e": "pnpm --filter @cg/frontend test:e2e"
   }
 }

@@ -36,6 +36,8 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff,woff2}"],
+        // A API é servida pela mesma origem: nunca responder /api com o index.html do SPA.
+        navigateFallbackDenylist: [/^\/api\//],
         runtimeCaching: [
           {
             urlPattern: /\/api\//,
@@ -63,8 +65,9 @@ export default defineConfig({
   },
   server: {
     port: 5174,
-  },
-  preview: {
-    allowedHosts: true,
+    // Em dev o backend roda separado; o proxy mantém a mesma origem de produção.
+    proxy: {
+      "/api": { target: "http://localhost:3001" },
+    },
   },
 });

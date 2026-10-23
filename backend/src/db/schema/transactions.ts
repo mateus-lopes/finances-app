@@ -3,9 +3,9 @@ import { users } from "./users";
 import { accounts } from "./accounts";
 import { categories } from "./categories";
 import { bills } from "./bills";
+import type { TransactionType } from "../../modules/ledger/domain/transaction";
 
-export const TRANSACTION_TYPES = ["income", "expense", "transfer"] as const;
-export type TransactionType = (typeof TRANSACTION_TYPES)[number];
+export { TRANSACTION_TYPES, type TransactionType } from "../../modules/ledger/domain/transaction";
 
 export const transactions = pgTable("transactions", {
   id: serial("id").primaryKey(),
