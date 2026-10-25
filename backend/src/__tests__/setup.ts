@@ -1,7 +1,7 @@
 import { beforeAll, afterAll } from "vitest";
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 import { eq, sql } from "drizzle-orm";
-import { db } from "../db/client";
+import { db } from "../db/node";
 import { users, accounts, categories, transactions, bills, billOccurrences, creditCardInvoices } from "../db/schema";
 
 export const TEST_EMAIL = "vitest-test-user@test.local";

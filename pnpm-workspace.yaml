@@ -2,6 +2,6 @@ packages:
   - "backend"
   - "frontend"
 allowBuilds:
-  bcrypt: true
   esbuild: true
   vue-demi: true
+  workerd: true

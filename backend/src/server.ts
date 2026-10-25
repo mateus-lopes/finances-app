@@ -1,6 +1,9 @@
+import { serve } from "@hono/node-server";
 import app from "./app";
-import { env } from "./config/env";
 
-app.listen(env.PORT, () => {
-  console.log(`Servidor rodando em http://localhost:${env.PORT}`);
+const port = Number(process.env.PORT ?? 3001);
+
+// Dev local: o Vite (porta 5174) faz proxy de /api para cá.
+serve({ fetch: app.fetch, port }, () => {
+  console.log(`API rodando em http://localhost:${port}`);
 });

@@ -1,20 +1,13 @@
-import { drizzle } from "drizzle-orm/node-postgres";
-import { Pool } from "pg";
-import { env } from "../config/env";
+import { neon } from "@neondatabase/serverless";
+import { drizzle } from "drizzle-orm/neon-http";
 import * as schema from "./schema";
 
-const isTest = env.NODE_ENV === "test";
+/**
+ * Driver HTTP do Neon: cada query é um fetch, sem conexão persistente. Funciona
+ * igual no Workers (onde I/O não pode ser compartilhado entre requisições) e no Node.
+ */
+export function createDatabase(databaseUrl: string) {
+  return drizzle(neon(databaseUrl), { schema });
+}
 
-const pool = new Pool({
-  connectionString: env.DATABASE_URL,
-  max: isTest ? 5 : 20,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: isTest ? 15000 : 10000,
-});
-
-// Neon auto-suspende conexões idle — sem esse handler o processo crasha
-pool.on("error", (err) => {
-  console.error("Unexpected pool error:", err);
-});
-
-export const db = drizzle(pool, { schema });
+export type Database = ReturnType<typeof createDatabase>;
