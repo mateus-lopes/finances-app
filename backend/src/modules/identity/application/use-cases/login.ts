@@ -21,6 +21,6 @@ export class Login {
     if (!valid) return null;
 
     const profile = toProfile(user);
-    return { token: this.tokens.issue(profile), user: profile };
+    return { token: await this.tokens.issue(profile), user: profile };
   }
 }

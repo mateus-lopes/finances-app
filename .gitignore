@@ -10,3 +10,5 @@ coverage/
 .claude/
 frontend/playwright-report/
 frontend/test-results/
+.wrangler/
+.dev.vars

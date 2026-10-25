@@ -1,17 +1,15 @@
-import fs from "node:fs";
-import path from "node:path";
+import "dotenv/config";
 import { createContainer } from "./bootstrap/container";
 import { createHttpApp } from "./bootstrap/http-app";
-import { env, isProduction } from "./shared/infrastructure/config/env";
+import { isProduction, parseConfig } from "./shared/infrastructure/config/env";
+import { memoryRateLimiter } from "./shared/infrastructure/http/rate-limiter";
 
-// src/ (tsx) e dist/ (build) ficam no mesmo nível → ../../frontend/dist nos dois casos.
-const defaultStaticDir = path.resolve(__dirname, "../../frontend/dist");
-const staticDir = env.STATIC_DIR ? path.resolve(env.STATIC_DIR) : defaultStaticDir;
+/** App para o runtime Node (dev local e testes), configurado pelo `.env`. */
+export const config = parseConfig(process.env);
 
-const app = createHttpApp({
-  routes: createContainer().routes,
-  staticDir: env.NODE_ENV !== "test" && fs.existsSync(path.join(staticDir, "index.html")) ? staticDir : null,
-  isProduction,
-});
+const app = createHttpApp(createContainer({
+  config,
+  loginRateLimiter: memoryRateLimiter(isProduction(config) ? 10 : 10_000, 15 * 60 * 1000),
+}).routes);
 
 export default app;

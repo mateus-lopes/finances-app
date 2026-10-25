@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { authed } from "../helpers/client";
 import { createAccount, createBill } from "../helpers/factories";
-import { db } from "../../db/client";
+import { db } from "../../db/node";
 import { bills, billOccurrences, transactions, accounts } from "../../db/schema";
 import { eq } from "drizzle-orm";
 import { getTestUserId } from "../setup";
@@ -59,7 +59,7 @@ describe("GET /api/bills", () => {
 });
 
 describe("PATCH /api/bills/occurrences/:id/pay — marcar pago", () => {
-  it("cria transação ao marcar como pago", async () => {
+  it("marca como pago sem criar transação (OFX é a fonte de verdade)", async () => {
     const acc = await createAccount();
     await createBill({ fromAccountId: acc.id, amount: "500.00", startDate: `${Y}-01-01` });
 
@@ -71,11 +71,10 @@ describe("PATCH /api/bills/occurrences/:id/pay — marcar pago", () => {
     const payRes = await req.patch(`/api/bills/occurrences/${occ.id}/pay`);
     expect(payRes.status).toBe(200);
     expect(payRes.body.paid).toBe(true);
-    expect(payRes.body.transactionId).toBeTypeOf("number");
+    expect(payRes.body.transactionId).toBeNull();
 
-    // Transação criada e visível
     const txRes = await req.get(`/api/transactions?month=${M}&year=${Y}`);
-    expect(txRes.body.items.some((tx: { id: number }) => tx.id === payRes.body.transactionId)).toBe(true);
+    expect(txRes.body.items).toHaveLength(0);
   });
 
   it("totals refletem pagamento", async () => {
@@ -94,7 +93,7 @@ describe("PATCH /api/bills/occurrences/:id/pay — marcar pago", () => {
 });
 
 describe("PATCH /api/bills/occurrences/:id/pay — desmarcar pago", () => {
-  it("deleta a transação ao desmarcar", async () => {
+  it("volta para pendente ao desmarcar", async () => {
     const acc = await createAccount();
     await createBill({ fromAccountId: acc.id, amount: "500.00", startDate: `${Y}-01-01` });
 

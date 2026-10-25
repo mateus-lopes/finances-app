@@ -1,7 +1,7 @@
-import type { Router } from "express";
+import type { Hono } from "hono";
 import type { Database } from "../../db/client";
 import type { Clock } from "../../shared/kernel/clock";
-import type { RequireAuth } from "../../shared/infrastructure/http/auth-context";
+import type { AppEnv, RequireAuth } from "../../shared/infrastructure/http/auth-context";
 import type { LedgerApi } from "./contracts";
 import { LedgerFacade } from "./application/ledger-facade";
 import { GetAccountBalances } from "./application/use-cases/accounts/get-account-balances";
@@ -36,9 +36,9 @@ export interface LedgerModuleDeps {
 }
 
 export interface LedgerModule {
-  accountsRouter: Router;
-  transactionsRouter: Router;
-  categoriesRouter: Router;
+  accountsRouter: Hono<AppEnv>;
+  transactionsRouter: Hono<AppEnv>;
+  categoriesRouter: Hono<AppEnv>;
   api: LedgerApi;
 }
 

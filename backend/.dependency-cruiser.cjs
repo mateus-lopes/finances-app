@@ -34,7 +34,7 @@ module.exports = {
     {
       name: "application-depends-inward",
       severity: "error",
-      comment: "application/ orquestra o domínio via ports; não importa infraestrutura, apresentação, banco ou Express.",
+      comment: "application/ orquestra o domínio via ports; não importa infraestrutura, apresentação, banco ou framework HTTP.",
       from: { path: `${MODULE}application/` },
       to: {
         pathNot: [

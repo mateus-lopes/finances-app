@@ -1,4 +1,4 @@
-import { db } from "../../db/client";
+import { db } from "../../db/node";
 import { accounts, categories, transactions, bills } from "../../db/schema";
 import { getTestUserId } from "../setup";
 

@@ -1,5 +1,5 @@
-import type { Router } from "express";
-import type { RequireAuth } from "../../shared/infrastructure/http/auth-context";
+import type { Hono } from "hono";
+import type { AppEnv, RequireAuth } from "../../shared/infrastructure/http/auth-context";
 import type { LedgerApi } from "../ledger/contracts";
 import { ApplyKeywordRules } from "./application/use-cases/apply-keyword-rules";
 import { createCategorizerRouter } from "./presentation/http/categorizer.routes";
@@ -10,7 +10,7 @@ export interface CategorizerModuleDeps {
 }
 
 export interface CategorizerModule {
-  router: Router;
+  router: Hono<AppEnv>;
 }
 
 export function createCategorizerModule({ requireAuth, ledger }: CategorizerModuleDeps): CategorizerModule {

@@ -1,8 +1,7 @@
-import { Router } from "express";
+import { Hono } from "hono";
 import { z } from "zod";
-import { asyncHandler } from "../../../../shared/infrastructure/http/async-handler";
-import { userIdOf, type RequireAuth } from "../../../../shared/infrastructure/http/auth-context";
-import { parseBody, parseIdParam, periodQuerySchema } from "../../../../shared/infrastructure/http/validation";
+import { userIdOf, type AppEnv, type RequireAuth } from "../../../../shared/infrastructure/http/auth-context";
+import { httpError, parseBody, parseIdParam, periodQuerySchema } from "../../../../shared/infrastructure/http/validation";
 import { BILL_FREQUENCIES, BILL_TYPES, type BillData } from "../../domain/bill";
 import type { ListBillsForMonth } from "../../application/use-cases/list-bills-for-month";
 import type { CreateBill } from "../../application/use-cases/create-bill";
@@ -52,53 +51,48 @@ export interface BillsRouterDeps {
 }
 
 export function createBillsRouter(deps: BillsRouterDeps) {
-  const router = Router();
+  const router = new Hono<AppEnv>();
   router.use(deps.requireAuth);
 
-  router.get("/", asyncHandler(async (req, res) => {
-    const period = periodQuerySchema.safeParse(req.query);
-    if (!period.success) { res.status(400).json({ error: "month e year são obrigatórios" }); return; }
-    res.json(await deps.listBillsForMonth.execute(userIdOf(req), period.data));
-  }));
+  router.get("/", async (c) => {
+    const period = periodQuerySchema.safeParse(c.req.query());
+    if (!period.success) httpError(400, "month e year são obrigatórios");
+    return c.json(await deps.listBillsForMonth.execute(userIdOf(c), period.data));
+  });
 
-  router.post("/", asyncHandler(async (req, res) => {
-    const body = parseBody(billSchema, req.body, res);
-    if (!body) return;
-    res.status(201).json(await deps.createBill.execute(userIdOf(req), toBillData(body)));
-  }));
+  router.post("/", async (c) => {
+    const body = await parseBody(c, billSchema);
+    return c.json(await deps.createBill.execute(userIdOf(c), toBillData(body)), 201);
+  });
 
-  router.put("/:id", asyncHandler(async (req, res) => {
-    const id = parseIdParam(req, res);
-    if (id === null) return;
-    const body = parseBody(billSchema, req.body, res);
-    if (!body) return;
-    const bill = await deps.updateBill.execute(userIdOf(req), id, toBillData(body));
-    if (!bill) { res.status(404).json({ error: "Recorrente não encontrado" }); return; }
-    res.json(bill);
-  }));
+  router.put("/:id", async (c) => {
+    const id = parseIdParam(c);
+    const body = await parseBody(c, billSchema);
+    const bill = await deps.updateBill.execute(userIdOf(c), id, toBillData(body));
+    if (!bill) return c.json({ error: "Recorrente não encontrado" }, 404);
+    return c.json(bill);
+  });
 
-  router.delete("/:id", asyncHandler(async (req, res) => {
-    const id = parseIdParam(req, res);
-    if (id === null) return;
-    const bill = await deps.deactivateBill.execute(userIdOf(req), id);
-    if (!bill) { res.status(404).json({ error: "Recorrente não encontrado" }); return; }
-    res.json({ ok: true });
-  }));
+  router.delete("/:id", async (c) => {
+    const id = parseIdParam(c);
+    const bill = await deps.deactivateBill.execute(userIdOf(c), id);
+    if (!bill) return c.json({ error: "Recorrente não encontrado" }, 404);
+    return c.json({ ok: true });
+  });
 
-  router.get("/occurrences", asyncHandler(async (req, res) => {
-    const period = periodQuerySchema.safeParse(req.query);
-    if (!period.success) { res.status(400).json({ error: "month e year são obrigatórios" }); return; }
-    await deps.ensureOccurrences.execute(userIdOf(req), period.data);
-    res.json({ ok: true });
-  }));
+  router.get("/occurrences", async (c) => {
+    const period = periodQuerySchema.safeParse(c.req.query());
+    if (!period.success) httpError(400, "month e year são obrigatórios");
+    await deps.ensureOccurrences.execute(userIdOf(c), period.data);
+    return c.json({ ok: true });
+  });
 
-  router.patch("/occurrences/:id/pay", asyncHandler(async (req, res) => {
-    const id = parseIdParam(req, res);
-    if (id === null) return;
-    const occurrence = await deps.toggleOccurrencePaid.execute(userIdOf(req), id);
-    if (!occurrence) { res.status(404).json({ error: "Ocorrência não encontrada" }); return; }
-    res.json(occurrence);
-  }));
+  router.patch("/occurrences/:id/pay", async (c) => {
+    const id = parseIdParam(c);
+    const occurrence = await deps.toggleOccurrencePaid.execute(userIdOf(c), id);
+    if (!occurrence) return c.json({ error: "Ocorrência não encontrada" }, 404);
+    return c.json(occurrence);
+  });
 
   return router;
 }

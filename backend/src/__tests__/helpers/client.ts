@@ -1,8 +1,9 @@
 import supertest from "supertest";
+import { getRequestListener } from "@hono/node-server";
 import app from "../../app";
 import { TEST_EMAIL, TEST_PASSWORD } from "../setup";
 
-export const api = supertest(app);
+export const api = supertest(getRequestListener(app.fetch));
 
 export async function getAuthCookie(): Promise<string> {
   const res = await api

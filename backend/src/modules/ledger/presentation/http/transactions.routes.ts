@@ -1,8 +1,7 @@
-import { Router } from "express";
+import { Hono } from "hono";
 import { z } from "zod";
-import { asyncHandler } from "../../../../shared/infrastructure/http/async-handler";
-import { userIdOf, type RequireAuth } from "../../../../shared/infrastructure/http/auth-context";
-import { parseBody, parseIdParam, periodQuerySchema } from "../../../../shared/infrastructure/http/validation";
+import { userIdOf, type AppEnv, type RequireAuth } from "../../../../shared/infrastructure/http/auth-context";
+import { httpError, parseBody, parseIdParam, periodQuerySchema, readJson } from "../../../../shared/infrastructure/http/validation";
 import { TRANSACTION_TYPES, type TransactionDraft } from "../../domain/transaction";
 import type { ListTransactions } from "../../application/use-cases/transactions/list-transactions";
 import type { CreateTransaction } from "../../application/use-cases/transactions/create-transaction";
@@ -60,45 +59,41 @@ export interface TransactionsRouterDeps {
 }
 
 export function createTransactionsRouter(deps: TransactionsRouterDeps) {
-  const router = Router();
+  const router = new Hono<AppEnv>();
   router.use(deps.requireAuth);
 
-  router.get("/", asyncHandler(async (req, res) => {
-    const query = listQuerySchema.safeParse(req.query);
-    if (!query.success) { res.status(400).json({ error: "month e year são obrigatórios" }); return; }
+  router.get("/", async (c) => {
+    const query = listQuerySchema.safeParse(c.req.query());
+    if (!query.success) httpError(400, "month e year são obrigatórios");
     const { month, year, ...filters } = query.data;
-    res.json(await deps.listTransactions.execute(userIdOf(req), { month, year }, filters));
-  }));
+    return c.json(await deps.listTransactions.execute(userIdOf(c), { month, year }, filters));
+  });
 
-  router.post("/auto-categorize", asyncHandler(async (req, res) => {
-    const period = periodQuerySchema.safeParse(req.body);
-    if (!period.success) { res.status(400).json({ error: "month e year são obrigatórios" }); return; }
-    res.json(await deps.autoCategorizeByHistory.execute(userIdOf(req), period.data));
-  }));
+  router.post("/auto-categorize", async (c) => {
+    const period = periodQuerySchema.safeParse(await readJson(c));
+    if (!period.success) httpError(400, "month e year são obrigatórios");
+    return c.json(await deps.autoCategorizeByHistory.execute(userIdOf(c), period.data));
+  });
 
-  router.post("/", asyncHandler(async (req, res) => {
-    const body = parseBody(transactionSchema, req.body, res);
-    if (!body) return;
-    res.status(201).json(await deps.createTransaction.execute(userIdOf(req), toDraft(body)));
-  }));
+  router.post("/", async (c) => {
+    const body = await parseBody(c, transactionSchema);
+    return c.json(await deps.createTransaction.execute(userIdOf(c), toDraft(body)), 201);
+  });
 
-  router.put("/:id", asyncHandler(async (req, res) => {
-    const id = parseIdParam(req, res);
-    if (id === null) return;
-    const body = parseBody(transactionSchema, req.body, res);
-    if (!body) return;
-    const tx = await deps.updateTransaction.execute(userIdOf(req), id, toDraft(body));
-    if (!tx) { res.status(404).json({ error: "Transação não encontrada" }); return; }
-    res.json(tx);
-  }));
+  router.put("/:id", async (c) => {
+    const id = parseIdParam(c);
+    const body = await parseBody(c, transactionSchema);
+    const tx = await deps.updateTransaction.execute(userIdOf(c), id, toDraft(body));
+    if (!tx) return c.json({ error: "Transação não encontrada" }, 404);
+    return c.json(tx);
+  });
 
-  router.delete("/:id", asyncHandler(async (req, res) => {
-    const id = parseIdParam(req, res);
-    if (id === null) return;
-    const tx = await deps.deleteTransaction.execute(userIdOf(req), id);
-    if (!tx) { res.status(404).json({ error: "Transação não encontrada" }); return; }
-    res.json({ ok: true });
-  }));
+  router.delete("/:id", async (c) => {
+    const id = parseIdParam(c);
+    const tx = await deps.deleteTransaction.execute(userIdOf(c), id);
+    if (!tx) return c.json({ error: "Transação não encontrada" }, 404);
+    return c.json({ ok: true });
+  });
 
   return router;
 }

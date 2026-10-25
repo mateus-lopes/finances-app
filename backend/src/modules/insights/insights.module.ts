@@ -1,6 +1,6 @@
-import type { Router } from "express";
+import type { Hono } from "hono";
 import type { Database } from "../../db/client";
-import type { RequireAuth } from "../../shared/infrastructure/http/auth-context";
+import type { AppEnv, RequireAuth } from "../../shared/infrastructure/http/auth-context";
 import type { LedgerApi } from "../ledger/contracts";
 import type { PlanningApi } from "../planning/contracts";
 import { GetDashboard } from "./application/use-cases/get-dashboard";
@@ -21,8 +21,8 @@ export interface InsightsModuleDeps {
 }
 
 export interface InsightsModule {
-  dashboardRouter: Router;
-  aiRouter: Router;
+  dashboardRouter: Hono<AppEnv>;
+  aiRouter: Hono<AppEnv>;
 }
 
 export function createInsightsModule({ db, requireAuth, ledger, planning, geminiApiKey }: InsightsModuleDeps): InsightsModule {

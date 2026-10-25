@@ -1,8 +1,7 @@
-import { Router } from "express";
+import { Hono } from "hono";
 import { z } from "zod";
-import { asyncHandler } from "../../../../shared/infrastructure/http/async-handler";
-import { userIdOf, type RequireAuth } from "../../../../shared/infrastructure/http/auth-context";
-import { parseBody, parseIdParam, periodQuerySchema } from "../../../../shared/infrastructure/http/validation";
+import { userIdOf, type AppEnv, type RequireAuth } from "../../../../shared/infrastructure/http/auth-context";
+import { httpError, parseBody, parseIdParam, periodQuerySchema, readJson } from "../../../../shared/infrastructure/http/validation";
 import { ACCOUNT_TYPES } from "../../domain/account";
 import type { GetAccountBalances } from "../../application/use-cases/accounts/get-account-balances";
 import type { CreateAccount } from "../../application/use-cases/accounts/create-account";
@@ -33,55 +32,49 @@ export interface AccountsRouterDeps {
 }
 
 export function createAccountsRouter(deps: AccountsRouterDeps) {
-  const router = Router();
+  const router = new Hono<AppEnv>();
   router.use(deps.requireAuth);
 
   // Saldo acumulado de todo o histórico (month/year na query são ignorados).
-  router.get("/", asyncHandler(async (req, res) => {
-    res.json(await deps.getAccountBalances.execute(userIdOf(req), { kind: "all-time" }));
-  }));
+  router.get("/", async (c) => {
+    return c.json(await deps.getAccountBalances.execute(userIdOf(c), { kind: "all-time" }));
+  });
 
-  router.post("/", asyncHandler(async (req, res) => {
-    const body = parseBody(accountSchema, req.body, res);
-    if (!body) return;
-    res.status(201).json(await deps.createAccount.execute(userIdOf(req), body));
-  }));
+  router.post("/", async (c) => {
+    const body = await parseBody(c, accountSchema);
+    return c.json(await deps.createAccount.execute(userIdOf(c), body), 201);
+  });
 
-  router.put("/:id", asyncHandler(async (req, res) => {
-    const id = parseIdParam(req, res);
-    if (id === null) return;
-    const body = parseBody(accountSchema, req.body, res);
-    if (!body) return;
-    const account = await deps.updateAccount.execute(userIdOf(req), id, body);
-    if (!account) { res.status(404).json({ error: "Conta não encontrada" }); return; }
-    res.json(account);
-  }));
+  router.put("/:id", async (c) => {
+    const id = parseIdParam(c);
+    const body = await parseBody(c, accountSchema);
+    const account = await deps.updateAccount.execute(userIdOf(c), id, body);
+    if (!account) return c.json({ error: "Conta não encontrada" }, 404);
+    return c.json(account);
+  });
 
-  router.delete("/:id", asyncHandler(async (req, res) => {
-    const id = parseIdParam(req, res);
-    if (id === null) return;
-    const account = await deps.deactivateAccount.execute(userIdOf(req), id);
-    if (!account) { res.status(404).json({ error: "Conta não encontrada" }); return; }
-    res.json({ ok: true });
-  }));
+  router.delete("/:id", async (c) => {
+    const id = parseIdParam(c);
+    const account = await deps.deactivateAccount.execute(userIdOf(c), id);
+    if (!account) return c.json({ error: "Conta não encontrada" }, 404);
+    return c.json({ ok: true });
+  });
 
-  router.get("/:id/invoice", asyncHandler(async (req, res) => {
-    const id = parseIdParam(req, res);
-    if (id === null) return;
-    const period = periodQuerySchema.safeParse(req.query);
-    if (!period.success) { res.status(400).json({ error: "month e year são obrigatórios" }); return; }
-    const invoice = await deps.getCreditCardInvoice.execute(userIdOf(req), id, period.data);
-    if (!invoice) { res.status(404).json({ error: "Conta não encontrada ou não é cartão" }); return; }
-    res.json(invoice);
-  }));
+  router.get("/:id/invoice", async (c) => {
+    const id = parseIdParam(c);
+    const period = periodQuerySchema.safeParse(c.req.query());
+    if (!period.success) httpError(400, "month e year são obrigatórios");
+    const invoice = await deps.getCreditCardInvoice.execute(userIdOf(c), id, period.data);
+    if (!invoice) return c.json({ error: "Conta não encontrada ou não é cartão" }, 404);
+    return c.json(invoice);
+  });
 
-  router.patch("/:id/invoice/pay", asyncHandler(async (req, res) => {
-    const id = parseIdParam(req, res);
-    if (id === null) return;
-    const period = periodQuerySchema.safeParse(req.body);
-    if (!period.success) { res.status(400).json({ error: "month e year são obrigatórios" }); return; }
-    res.json(await deps.toggleInvoicePaid.execute(userIdOf(req), id, period.data));
-  }));
+  router.patch("/:id/invoice/pay", async (c) => {
+    const id = parseIdParam(c);
+    const period = periodQuerySchema.safeParse(await readJson(c));
+    if (!period.success) httpError(400, "month e year são obrigatórios");
+    return c.json(await deps.toggleInvoicePaid.execute(userIdOf(c), id, period.data));
+  });
 
   return router;
 }

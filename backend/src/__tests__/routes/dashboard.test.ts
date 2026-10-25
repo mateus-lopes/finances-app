@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { authed } from "../helpers/client";
 import { createAccount, createTransaction } from "../helpers/factories";
-import { db } from "../../db/client";
+import { db } from "../../db/node";
 import { accounts, transactions, billOccurrences, bills } from "../../db/schema";
 import { eq } from "drizzle-orm";
 import { getTestUserId } from "../setup";

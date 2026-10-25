@@ -1,5 +1,5 @@
 import { isNotNull, inArray } from "drizzle-orm";
-import { db } from "../db/client";
+import { db } from "../db/node";
 import { transactions, billOccurrences, creditCardInvoices } from "../db/schema";
 
 async function cleanup() {

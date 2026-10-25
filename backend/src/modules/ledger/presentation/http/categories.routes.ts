@@ -1,7 +1,6 @@
-import { Router } from "express";
+import { Hono } from "hono";
 import { z } from "zod";
-import { asyncHandler } from "../../../../shared/infrastructure/http/async-handler";
-import { userIdOf, type RequireAuth } from "../../../../shared/infrastructure/http/auth-context";
+import { userIdOf, type AppEnv, type RequireAuth } from "../../../../shared/infrastructure/http/auth-context";
 import { parseBody, parseIdParam } from "../../../../shared/infrastructure/http/validation";
 import type { ListCategories } from "../../application/use-cases/categories/list-categories";
 import type { CreateCategory } from "../../application/use-cases/categories/create-category";
@@ -22,36 +21,32 @@ export interface CategoriesRouterDeps {
 }
 
 export function createCategoriesRouter(deps: CategoriesRouterDeps) {
-  const router = Router();
+  const router = new Hono<AppEnv>();
   router.use(deps.requireAuth);
 
-  router.get("/", asyncHandler(async (req, res) => {
-    res.json(await deps.listCategories.execute(userIdOf(req)));
-  }));
+  router.get("/", async (c) => {
+    return c.json(await deps.listCategories.execute(userIdOf(c)));
+  });
 
-  router.post("/", asyncHandler(async (req, res) => {
-    const body = parseBody(categorySchema, req.body, res);
-    if (!body) return;
-    res.status(201).json(await deps.createCategory.execute(userIdOf(req), body));
-  }));
+  router.post("/", async (c) => {
+    const body = await parseBody(c, categorySchema);
+    return c.json(await deps.createCategory.execute(userIdOf(c), body), 201);
+  });
 
-  router.put("/:id", asyncHandler(async (req, res) => {
-    const id = parseIdParam(req, res);
-    if (id === null) return;
-    const body = parseBody(categorySchema, req.body, res);
-    if (!body) return;
-    const category = await deps.updateCategory.execute(userIdOf(req), id, body);
-    if (!category) { res.status(404).json({ error: "Categoria não encontrada" }); return; }
-    res.json(category);
-  }));
+  router.put("/:id", async (c) => {
+    const id = parseIdParam(c);
+    const body = await parseBody(c, categorySchema);
+    const category = await deps.updateCategory.execute(userIdOf(c), id, body);
+    if (!category) return c.json({ error: "Categoria não encontrada" }, 404);
+    return c.json(category);
+  });
 
-  router.delete("/:id", asyncHandler(async (req, res) => {
-    const id = parseIdParam(req, res);
-    if (id === null) return;
-    const category = await deps.deleteCategory.execute(userIdOf(req), id);
-    if (!category) { res.status(404).json({ error: "Categoria não encontrada" }); return; }
-    res.json({ ok: true });
-  }));
+  router.delete("/:id", async (c) => {
+    const id = parseIdParam(c);
+    const category = await deps.deleteCategory.execute(userIdOf(c), id);
+    if (!category) return c.json({ error: "Categoria não encontrada" }, 404);
+    return c.json({ ok: true });
+  });
 
   return router;
 }

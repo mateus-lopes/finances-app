@@ -1,6 +1,8 @@
-import type { Router } from "express";
-import { db } from "../db/client";
-import { env, isProduction } from "../shared/infrastructure/config/env";
+import type { Hono } from "hono";
+import { createDatabase } from "../db/client";
+import { isProduction, type AppConfig } from "../shared/infrastructure/config/env";
+import type { AppEnv } from "../shared/infrastructure/http/auth-context";
+import type { RateLimiter } from "../shared/infrastructure/http/rate-limiter";
 import { systemClock } from "../shared/kernel/clock";
 import { createIdentityModule } from "../modules/identity/identity.module";
 import { createLedgerModule } from "../modules/ledger/ledger.module";
@@ -10,21 +12,29 @@ import { createImportingModule } from "../modules/importing/importing.module";
 import { createInsightsModule } from "../modules/insights/insights.module";
 
 /** Rota da API (prefixo sob /api) → router do módulo responsável. */
-export type ApiRoutes = ReadonlyArray<readonly [path: string, router: Router]>;
+export type ApiRoutes = ReadonlyArray<readonly [path: string, router: Hono<AppEnv>]>;
+
+export interface ContainerDeps {
+  config: AppConfig;
+  /** Varia por runtime: binding do Cloudflare em produção, memória no Node. */
+  loginRateLimiter: RateLimiter;
+}
 
 /**
  * Composition root: o único lugar que conhece todas as implementações
  * concretas. Ordem = grafo de dependências entre módulos:
  *   identity → ledger → planning → categorizer / importing → insights
  */
-export function createContainer(): { routes: ApiRoutes } {
+export function createContainer({ config, loginRateLimiter }: ContainerDeps): { routes: ApiRoutes } {
+  const db = createDatabase(config.DATABASE_URL);
   const clock = systemClock;
 
   const identity = createIdentityModule({
     db,
-    jwtSecret: env.JWT_SECRET,
-    adminResetPassword: env.ADMIN_RESET_PASSWORD,
-    isProduction,
+    jwtSecret: config.JWT_SECRET,
+    adminResetPassword: config.ADMIN_RESET_PASSWORD,
+    loginRateLimiter,
+    isProduction: isProduction(config),
   });
   const { requireAuth } = identity;
 
@@ -37,7 +47,7 @@ export function createContainer(): { routes: ApiRoutes } {
     requireAuth,
     ledger: ledger.api,
     planning: planning.api,
-    geminiApiKey: env.GEMINI_API_KEY,
+    geminiApiKey: config.GEMINI_API_KEY,
   });
 
   return {

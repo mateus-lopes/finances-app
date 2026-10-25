@@ -1,7 +1,6 @@
-import { Router } from "express";
+import { Hono } from "hono";
 import { z } from "zod";
-import { asyncHandler } from "../../../../shared/infrastructure/http/async-handler";
-import { userIdOf, type RequireAuth } from "../../../../shared/infrastructure/http/auth-context";
+import { userIdOf, type AppEnv, type RequireAuth } from "../../../../shared/infrastructure/http/auth-context";
 import { parseBody } from "../../../../shared/infrastructure/http/validation";
 import type { ApplyKeywordRules } from "../../application/use-cases/apply-keyword-rules";
 
@@ -16,14 +15,13 @@ export interface CategorizerRouterDeps {
 }
 
 export function createCategorizerRouter({ requireAuth, applyKeywordRules }: CategorizerRouterDeps) {
-  const router = Router();
+  const router = new Hono<AppEnv>();
   router.use(requireAuth);
 
-  router.post("/apply", asyncHandler(async (req, res) => {
-    const body = parseBody(applySchema, req.body, res);
-    if (!body) return;
-    res.json(await applyKeywordRules.execute(userIdOf(req), body));
-  }));
+  router.post("/apply", async (c) => {
+    const body = await parseBody(c, applySchema);
+    return c.json(await applyKeywordRules.execute(userIdOf(c), body));
+  });
 
   return router;
 }

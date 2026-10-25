@@ -12,7 +12,7 @@ export interface PasswordHasher {
 }
 
 export interface SessionTokenService {
-  issue(user: UserProfile): string;
+  issue(user: UserProfile): Promise<string>;
   /** Retorna o id do usuário ou null se o token for inválido/expirado. */
-  verify(token: string): number | null;
+  verify(token: string): Promise<number | null>;
 }

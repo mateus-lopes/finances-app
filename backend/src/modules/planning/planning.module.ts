@@ -1,7 +1,7 @@
-import type { Router } from "express";
+import type { Hono } from "hono";
 import type { Database } from "../../db/client";
 import type { Clock } from "../../shared/kernel/clock";
-import type { RequireAuth } from "../../shared/infrastructure/http/auth-context";
+import type { AppEnv, RequireAuth } from "../../shared/infrastructure/http/auth-context";
 import type { LedgerApi } from "../ledger/contracts";
 import type { PlanningApi } from "./contracts";
 import { EnsureOccurrences } from "./application/use-cases/ensure-occurrences";
@@ -22,7 +22,7 @@ export interface PlanningModuleDeps {
 }
 
 export interface PlanningModule {
-  billsRouter: Router;
+  billsRouter: Hono<AppEnv>;
   api: PlanningApi;
 }
 

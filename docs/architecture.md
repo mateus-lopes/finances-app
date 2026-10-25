@@ -1,15 +1,15 @@
 # Arquitetura — monólito modular
 
-Um único serviço Node serve a API em `/api/*` e o build do Vue em todo o resto.
+Um único Cloudflare Worker serve a API em `/api/*`; o build do Vue sai dos static assets do
+mesmo Worker em todo o resto.
 Mesma origem ⇒ sem CORS e cookie de sessão first-party (`SameSite=Lax`).
 
 ```
 finances-app/
-├── backend/                 Express + Drizzle (Postgres/Neon)
+├── backend/                 Hono + Drizzle (Postgres/Neon, driver HTTP)
 ├── frontend/                Vue 3 + Pinia + Vite (PWA)
-├── railway.toml             deploy: 1 serviço, nixpacks
-├── nixpacks.toml
-└── package.json             scripts da raiz (build/start/dev/test/lint:arch)
+├── wrangler.jsonc           deploy: Worker + static assets + rate limit do login
+└── package.json             scripts da raiz (dev/build/preview/deploy/test/lint:arch)
 ```
 
 ## Bounded contexts
@@ -30,17 +30,19 @@ O OFX importado é a fonte de verdade das transações: marcar um recorrente com
 
 ```
 backend/src/
-├── server.ts                    entrypoint (listen)
-├── app.ts                       monta o app (usado também pelos testes)
+├── worker.ts                    entrypoint do Cloudflare Worker (config vem do `env` do Worker)
+├── server.ts                    entrypoint Node para dev local (@hono/node-server)
+├── app.ts                       app Node configurado pelo `.env` (dev e testes)
 ├── bootstrap/
 │   ├── container.ts             composition root — único lugar que instancia implementações
-│   └── http-app.ts              Express: helmet, /api, SPA estático, error handler
+│   └── http-app.ts              Hono: secure headers, limite de corpo, /api, 404 e error handler
 ├── db/
-│   ├── client.ts                pool pg + drizzle (pool.on('error') por causa do Neon)
+│   ├── client.ts                createDatabase: drizzle + neon-http (1 fetch por query, sem pool)
+│   ├── node.ts                  `db` pronto a partir do `.env` — só para scripts e testes
 │   └── schema/                  schema físico (1 arquivo por tabela) + index.ts (registro)
 ├── shared/
 │   ├── kernel/                  Period, money, Clock, refs — puro, sem dependências
-│   └── infrastructure/          env, helpers HTTP (asyncHandler, validação, SPA, erros)
+│   └── infrastructure/          config, helpers HTTP (validação, erros, rate limiter)
 ├── scripts/                     manutenção (`npx tsx src/scripts/<nome>.ts`)
 └── modules/<módulo>/
     ├── domain/                  regras puras (entidades, políticas, cálculos)
@@ -48,14 +50,14 @@ backend/src/
     │   ├── ports.ts             interfaces que a infraestrutura implementa
     │   └── use-cases/           1 classe por caso de uso (`execute`)
     ├── infrastructure/          repositórios Drizzle, adaptadores externos (Gemini, leitor OFX)
-    ├── presentation/http/       routers Express + validação Zod do contrato HTTP
+    ├── presentation/http/       routers Hono + validação Zod do contrato HTTP
     ├── contracts.ts             API pública consumida por outros módulos (só tipos/interfaces)
     └── <módulo>.module.ts       factory que monta o módulo (usada só pelo bootstrap)
 ```
 
 ### Regras de dependência (verificadas por `pnpm lint:arch`)
 
-- `domain` → só o próprio domínio e `shared/kernel`. Nada de Express, Drizzle ou pacotes npm.
+- `domain` → só o próprio domínio e `shared/kernel`. Nada de Hono, Drizzle ou pacotes npm.
 - `application` → domínio, ports e `contracts.ts` de outros módulos. Nunca infraestrutura/apresentação.
 - `presentation` → casos de uso e tipos de domínio. Nunca repositórios nem `db/`.
 - `infrastructure` → implementa ports; não conhece apresentação.
@@ -116,21 +118,32 @@ Convenção de import: dentro do módulo, caminhos relativos; para `shared/` e o
 
 ```bash
 pnpm install
-pnpm dev            # backend :3001 + Vite :5174 (proxy /api → :3001)
-pnpm test           # testes de integração do backend (Vitest)
-pnpm test:e2e       # Playwright
+pnpm dev            # API Node :3001 (tsx) + Vite :5174 (proxy /api → :3001)
+pnpm preview        # build + wrangler dev :8787 — o Worker real, com os secrets do .dev.vars
+pnpm test           # testes de integração do backend (Vitest, contra o banco do .env)
+pnpm test:e2e       # Playwright (FRONTEND_URL/BACKEND_URL=http://127.0.0.1:8787 testa o Worker)
 pnpm typecheck
 pnpm lint:arch
 ```
 
-## Deploy (Railway)
+O `.dev.vars` (gitignored) tem as mesmas chaves do `backend/.env`: `DATABASE_URL`, `JWT_SECRET`,
+`ADMIN_RESET_PASSWORD`, `GEMINI_API_KEY`.
 
-Um serviço apontando para a **raiz** do repositório. `railway.toml` usa nixpacks
-(não crie Dockerfile — o Railway passaria a ignorar o `railway.toml`).
+## Deploy (Cloudflare Workers)
 
-- build: `pnpm build` (frontend → `frontend/dist`, backend → `backend/dist`)
-- start: `pnpm start` (roda migrações e sobe `backend/dist/server.js`)
-- healthcheck: `GET /api/health`
+```bash
+pnpm deploy         # typecheck + lint:arch + build do frontend + wrangler deploy
+```
 
-Variáveis: `NODE_ENV=production`, `DATABASE_URL`, `JWT_SECRET`, `ADMIN_RESET_PASSWORD`,
-`GEMINI_API_KEY`. (`PORT` é injetada pelo Railway; `CORS_ORIGIN` e `VITE_API_URL` não existem mais.)
+- O Worker só é invocado para `/api/*` (`run_worker_first`); o resto é asset estático, com
+  fallback para `index.html` (`not_found_handling: single-page-application`).
+- Headers dos assets (CSP, cache imutável de `/assets/*`) ficam em `frontend/public/_headers`.
+- Rate limit do login: binding `LOGIN_LIMITER` (10 tentativas/min por IP).
+- Secrets: `npx wrangler secret put <NOME>` para `DATABASE_URL`, `JWT_SECRET`,
+  `ADMIN_RESET_PASSWORD` e `GEMINI_API_KEY`. `NODE_ENV=production` vem de `vars`.
+- Logs: `npx wrangler tail` ou o painel do Worker (observability ligado).
+
+**Migrações não rodam no deploy.** O histórico do Drizzle foi resetado e a tabela
+`drizzle.__drizzle_migrations` do banco está vazia, embora o schema já esteja na versão de
+`0001`. Rodar `db:migrate` hoje tentaria recriar as tabelas. Antes da próxima migration,
+registre as duas existentes nessa tabela (baseline) e então rode `pnpm --filter @cg/backend db:migrate`.

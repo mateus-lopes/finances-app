@@ -4,7 +4,7 @@ export class VerifySession {
   constructor(private readonly tokens: SessionTokenService) {}
 
   /** Retorna o id do usuário autenticado ou null. */
-  execute(token: string): number | null {
+  execute(token: string): Promise<number | null> {
     return this.tokens.verify(token);
   }
 }

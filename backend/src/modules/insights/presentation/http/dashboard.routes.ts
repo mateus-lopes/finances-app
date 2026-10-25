@@ -1,6 +1,6 @@
-import { Router, type Request } from "express";
-import { asyncHandler } from "../../../../shared/infrastructure/http/async-handler";
-import { userIdOf, type RequireAuth } from "../../../../shared/infrastructure/http/auth-context";
+import { Hono, type Context } from "hono";
+import { userIdOf, type AppEnv, type RequireAuth } from "../../../../shared/infrastructure/http/auth-context";
+import { httpError } from "../../../../shared/infrastructure/http/validation";
 import type { Period } from "../../../../shared/kernel/period";
 import type { GetDashboard } from "../../application/use-cases/get-dashboard";
 import type { GetMonthlyHistory } from "../../application/use-cases/get-monthly-history";
@@ -10,11 +10,11 @@ const DEFAULT_HISTORY_MONTHS = 6;
 const MAX_HISTORY_MONTHS = 24;
 
 /** `endMonth`/`endYear` + `months` (1–24, padrão 6). */
-function parseHistoryQuery(req: Request): { end: Period; months: number } | null {
-  const month = parseInt(String(req.query.endMonth));
-  const year = parseInt(String(req.query.endYear));
-  if (isNaN(month) || isNaN(year)) return null;
-  const months = Math.min(MAX_HISTORY_MONTHS, Math.max(1, parseInt(String(req.query.months)) || DEFAULT_HISTORY_MONTHS));
+function parseHistoryQuery(c: Context): { end: Period; months: number } {
+  const month = parseInt(String(c.req.query("endMonth")));
+  const year = parseInt(String(c.req.query("endYear")));
+  if (isNaN(month) || isNaN(year)) httpError(400, "endMonth e endYear são obrigatórios");
+  const months = Math.min(MAX_HISTORY_MONTHS, Math.max(1, parseInt(String(c.req.query("months"))) || DEFAULT_HISTORY_MONTHS));
   return { end: { month, year }, months };
 }
 
@@ -26,27 +26,25 @@ export interface DashboardRouterDeps {
 }
 
 export function createDashboardRouter(deps: DashboardRouterDeps) {
-  const router = Router();
+  const router = new Hono<AppEnv>();
   router.use(deps.requireAuth);
 
-  router.get("/", asyncHandler(async (req, res) => {
-    const month = parseInt(String(req.query.month));
-    const year = parseInt(String(req.query.year));
-    if (isNaN(month) || isNaN(year)) { res.status(400).json({ error: "month e year são obrigatórios" }); return; }
-    res.json(await deps.getDashboard.execute(userIdOf(req), { month, year }));
-  }));
+  router.get("/", async (c) => {
+    const month = parseInt(String(c.req.query("month")));
+    const year = parseInt(String(c.req.query("year")));
+    if (isNaN(month) || isNaN(year)) httpError(400, "month e year são obrigatórios");
+    return c.json(await deps.getDashboard.execute(userIdOf(c), { month, year }));
+  });
 
-  router.get("/history", asyncHandler(async (req, res) => {
-    const query = parseHistoryQuery(req);
-    if (!query) { res.status(400).json({ error: "endMonth e endYear são obrigatórios" }); return; }
-    res.json(await deps.getMonthlyHistory.execute(userIdOf(req), query.end, query.months));
-  }));
+  router.get("/history", async (c) => {
+    const query = parseHistoryQuery(c);
+    return c.json(await deps.getMonthlyHistory.execute(userIdOf(c), query.end, query.months));
+  });
 
-  router.get("/category-history", asyncHandler(async (req, res) => {
-    const query = parseHistoryQuery(req);
-    if (!query) { res.status(400).json({ error: "endMonth e endYear são obrigatórios" }); return; }
-    res.json(await deps.getCategoryHistory.execute(userIdOf(req), query.end, query.months));
-  }));
+  router.get("/category-history", async (c) => {
+    const query = parseHistoryQuery(c);
+    return c.json(await deps.getCategoryHistory.execute(userIdOf(c), query.end, query.months));
+  });
 
   return router;
 }

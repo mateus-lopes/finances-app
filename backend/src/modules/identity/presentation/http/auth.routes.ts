@@ -1,9 +1,9 @@
-import { Router } from "express";
-import rateLimit from "express-rate-limit";
+import { Hono } from "hono";
+import { deleteCookie, setCookie } from "hono/cookie";
 import { z } from "zod";
-import { asyncHandler } from "../../../../shared/infrastructure/http/async-handler";
-import { userIdOf, type RequireAuth } from "../../../../shared/infrastructure/http/auth-context";
-import { parseBody } from "../../../../shared/infrastructure/http/validation";
+import { userIdOf, type AppEnv, type RequireAuth } from "../../../../shared/infrastructure/http/auth-context";
+import type { RateLimiter } from "../../../../shared/infrastructure/http/rate-limiter";
+import { httpError, parseBody, readJson } from "../../../../shared/infrastructure/http/validation";
 import type { Login } from "../../application/use-cases/login";
 import type { GetCurrentUser } from "../../application/use-cases/get-current-user";
 import type { ResetPassword } from "../../application/use-cases/reset-password";
@@ -19,61 +19,44 @@ export interface AuthRouterDeps {
   getCurrentUser: GetCurrentUser;
   resetPassword: ResetPassword;
   requireAuth: RequireAuth;
+  loginRateLimiter: RateLimiter;
   isProduction: boolean;
 }
 
-export function createAuthRouter({ login, getCurrentUser, resetPassword, requireAuth, isProduction }: AuthRouterDeps) {
-  const router = Router();
+export function createAuthRouter({ login, getCurrentUser, resetPassword, requireAuth, loginRateLimiter, isProduction }: AuthRouterDeps) {
+  const router = new Hono<AppEnv>();
   const cookieOptions = sessionCookieOptions(isProduction);
 
-  const loginLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: isProduction ? 10 : 10000,
-    message: { error: "Muitas tentativas. Tente novamente em 15 minutos." },
-  });
+  router.post("/login", async (c) => {
+    const ip = c.req.header("cf-connecting-ip") ?? "local";
+    if (!(await loginRateLimiter.allow(ip))) httpError(429, "Muitas tentativas. Tente novamente em alguns minutos.");
 
-  router.post("/login", loginLimiter, asyncHandler(async (req, res) => {
-    const body = parseBody(loginSchema, req.body, res);
-    if (!body) return;
-
+    const body = await parseBody(c, loginSchema);
     const result = await login.execute(body.email, body.password);
-    if (!result) {
-      res.status(401).json({ error: "Credenciais inválidas" });
-      return;
-    }
+    if (!result) return c.json({ error: "Credenciais inválidas" }, 401);
 
-    res.cookie(SESSION_COOKIE, result.token, cookieOptions);
-    res.json({ user: result.user });
-  }));
-
-  router.post("/reset-password", asyncHandler(async (req, res) => {
-    const { adminPassword, email, newPassword } = req.body;
-    if (!adminPassword || !email || !newPassword) {
-      res.status(400).json({ error: "Campos obrigatórios ausentes" });
-      return;
-    }
-    const result = await resetPassword.execute(adminPassword, email, newPassword);
-    if (!result.ok) {
-      res.status(401).json({ error: result.error });
-      return;
-    }
-    res.json({ ok: true });
-  }));
-
-  router.post("/logout", (_req, res) => {
-    const { maxAge: _maxAge, ...clearOptions } = cookieOptions;
-    res.clearCookie(SESSION_COOKIE, clearOptions);
-    res.json({ ok: true });
+    setCookie(c, SESSION_COOKIE, result.token, cookieOptions);
+    return c.json({ user: result.user });
   });
 
-  router.get("/me", requireAuth, asyncHandler(async (req, res) => {
-    const user = await getCurrentUser.execute(userIdOf(req));
-    if (!user) {
-      res.status(401).json({ error: "Usuário não encontrado" });
-      return;
-    }
-    res.json({ user });
-  }));
+  router.post("/reset-password", async (c) => {
+    const { adminPassword, email, newPassword } = (await readJson(c)) as Record<string, string | undefined>;
+    if (!adminPassword || !email || !newPassword) return c.json({ error: "Campos obrigatórios ausentes" }, 400);
+    const result = await resetPassword.execute(adminPassword, email, newPassword);
+    if (!result.ok) return c.json({ error: result.error }, 401);
+    return c.json({ ok: true });
+  });
+
+  router.post("/logout", (c) => {
+    deleteCookie(c, SESSION_COOKIE, { path: "/", secure: cookieOptions.secure });
+    return c.json({ ok: true });
+  });
+
+  router.get("/me", requireAuth, async (c) => {
+    const user = await getCurrentUser.execute(userIdOf(c));
+    if (!user) return c.json({ error: "Usuário não encontrado" }, 401);
+    return c.json({ user });
+  });
 
   return router;
 }

@@ -9,11 +9,15 @@
     "dev": "pnpm --parallel --filter @cg/backend --filter @cg/frontend dev",
     "dev:backend": "pnpm --filter @cg/backend dev",
     "dev:frontend": "pnpm --filter @cg/frontend dev",
-    "build": "pnpm --filter @cg/frontend build && pnpm --filter @cg/backend build",
-    "start": "pnpm --filter @cg/backend db:migrate && pnpm --filter @cg/backend start",
+    "build": "pnpm --filter @cg/frontend build",
+    "preview": "pnpm build && wrangler dev",
+    "deploy": "pnpm typecheck && pnpm lint:arch && pnpm build && wrangler deploy",
     "typecheck": "pnpm --filter @cg/backend typecheck && pnpm --filter @cg/frontend typecheck",
     "lint:arch": "pnpm --filter @cg/backend lint:arch",
     "test": "pnpm --filter @cg/backend test:run",
     "test:e2e": "pnpm --filter @cg/frontend test:e2e"
+  },
+  "devDependencies": {
+    "wrangler": "^4.152.0"
   }
 }

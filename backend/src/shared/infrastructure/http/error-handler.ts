@@ -1,10 +1,10 @@
-import type { ErrorRequestHandler, RequestHandler } from "express";
+import type { ErrorHandler, NotFoundHandler } from "hono";
+import { HTTPException } from "hono/http-exception";
 
-export const apiNotFound: RequestHandler = (_req, res) => {
-  res.status(404).json({ error: "Rota não encontrada" });
-};
+export const apiNotFound: NotFoundHandler = (c) => c.json({ error: "Rota não encontrada" }, 404);
 
-export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
+export const errorHandler: ErrorHandler = (err, c) => {
+  if (err instanceof HTTPException) return err.getResponse();
   console.error(err);
-  res.status(500).json({ error: "Erro interno" });
+  return c.json({ error: "Erro interno" }, 500);
 };

@@ -1,5 +1,5 @@
-import type { Router } from "express";
-import type { RequireAuth } from "../../shared/infrastructure/http/auth-context";
+import type { Hono } from "hono";
+import type { AppEnv, RequireAuth } from "../../shared/infrastructure/http/auth-context";
 import type { LedgerApi } from "../ledger/contracts";
 import { PreviewImport } from "./application/use-cases/preview-import";
 import { ConfirmImport } from "./application/use-cases/confirm-import";
@@ -13,7 +13,7 @@ export interface ImportingModuleDeps {
 
 /** Módulo independente: nenhum outro módulo depende dele (pode ser removido sem impacto). */
 export interface ImportingModule {
-  router: Router;
+  router: Hono<AppEnv>;
 }
 
 export function createImportingModule({ requireAuth, ledger }: ImportingModuleDeps): ImportingModule {

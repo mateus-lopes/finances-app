@@ -1,0 +1,13 @@
+# Headers dos static assets no Cloudflare (as respostas da API recebem os seus do Hono).
+# index.html e sw.js usam o padrão do Cloudflare (revalidação a cada acesso),
+# senão o PWA não percebe deploys novos.
+
+/*
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; font-src 'self' https: data:; form-action 'self'; frame-ancestors 'self'; img-src 'self' data:; object-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self' https: 'unsafe-inline'; upgrade-insecure-requests
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: SAMEORIGIN
+  Referrer-Policy: no-referrer
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

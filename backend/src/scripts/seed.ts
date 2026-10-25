@@ -1,6 +1,6 @@
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 import { eq } from "drizzle-orm";
-import { db } from "../db/client";
+import { db } from "../db/node";
 import { users, accounts, categories, bills, transactions, billOccurrences, creditCardInvoices } from "../db/schema";
 
 async function seed() {
